@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@blockly/plugin-scroll-options": "^7.0.2",
+    "@mit-app-inventor/blockly-plugin-workspace-multiselect": "^1.0.1",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-slot": "^1.2.3",
     "blockly": "^12.0.0",

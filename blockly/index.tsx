@@ -20,6 +20,7 @@ import {
   ScrollBlockDragger,
   ScrollMetricsManager,
 } from "@blockly/plugin-scroll-options";
+import { Multiselect } from "@mit-app-inventor/blockly-plugin-workspace-multiselect";
 
 // Register blocks and generators
 Blockly.common.defineBlocks(blocks);
@@ -72,7 +73,34 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const workspace = Blockly.inject(containerRef.current, {
+    // Monkey patch defensivo: alguns plugins (ex.: workspace-multiselect) podem acionar
+    // caminhos no FocusManager do Blockly que assumem um node com canBeFocused().
+    // Em certas combinações de versões isso quebra em setSelected -> focusNode.
+    // Envolvemos setSelected em try/catch para evitar crash e manter a UI operável.
+    try {
+      type BlocklyCommon = {
+        setSelected?: (...args: unknown[]) => unknown;
+        __patchedSetSelected?: boolean;
+      };
+      const common = (Blockly as unknown as { common?: BlocklyCommon }).common;
+      if (
+        common &&
+        typeof common.setSelected === "function" &&
+        !common.__patchedSetSelected
+      ) {
+        const original = common.setSelected.bind(common);
+        common.setSelected = (...args: unknown[]) => {
+          try {
+            return original(...args);
+          } catch {
+            // Evita que o erro "a.canBeFocused is not a function" derrube a página.
+            return undefined;
+          }
+        };
+        common.__patchedSetSelected = true;
+      }
+    } catch {}
+    const options = {
       plugins: {
         blockDragger: ScrollBlockDragger,
         metricsManager: ScrollMetricsManager,
@@ -96,9 +124,27 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
         drag: true,
         wheel: true, // Required for wheel scroll to work.
       },
-    });
-    const plugin = new ScrollOptions(workspace);
-    plugin.init();
+      useDoubleClick: false, // Double click the blocks to collapse/expand
+      bumpNeighbours: false, // Bump neighbours after dragging to avoid overlapping.
+      multiFieldUpdate: true, // Keep the fields of multiple selected same-type blocks with the same value
+      workspaceAutoFocus: true, // Auto focus the workspace when the mouse enters.
+      multiselectIcon: {
+        hideIcon: false,
+        weight: 3,
+        enabledIcon:
+          "https://github.com/mit-cml/workspace-multiselect/raw/main/test/media/select.svg",
+        disabledIcon:
+          "https://github.com/mit-cml/workspace-multiselect/raw/main/test/media/unselect.svg",
+      }, // Use custom icon for the multi select controls.
+    };
+    const workspace = Blockly.inject(containerRef.current, options);
+
+    // Initialize plugins.
+    const multiselectPlugin = new Multiselect(workspace);
+    const scrollOptionsPlugin = new ScrollOptions(workspace);
+    multiselectPlugin.init(options);
+    scrollOptionsPlugin.init();
+
     workspaceRef.current = workspace;
     // create Play button (executes generated Python). It will notify subscribers with code.
     let playInstance: { init: () => void; dispose: () => void } | null = null;
