@@ -1,0 +1,27 @@
+svg[display="none"] {
+    display: none;
+}
+
+.blockly-workspace {
+  background-color: var(--background);
+  border: 1px solid var(--border);
+}
+
+.blockly-toolbox {
+  background-color: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+}
+
+.blockly-code-output {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+}
+
+.blocklyToolboxCategory {
+  margin-top: 20px;
+}
+
+.categoryBubble {
+   margin-bottom: 12px;
+}
