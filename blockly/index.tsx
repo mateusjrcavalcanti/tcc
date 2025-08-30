@@ -15,6 +15,11 @@ import "./styles.css";
 import { createPlayButton } from "./buttons/play";
 import { createBluetoothButton } from "./buttons/bluetooth";
 import { useBluetooth } from "../app/bluetooth-context";
+import {
+  ScrollOptions,
+  ScrollBlockDragger,
+  ScrollMetricsManager,
+} from "@blockly/plugin-scroll-options";
 
 // Register blocks and generators
 Blockly.common.defineBlocks(blocks);
@@ -68,6 +73,10 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
   useEffect(() => {
     if (!containerRef.current) return;
     const workspace = Blockly.inject(containerRef.current, {
+      plugins: {
+        blockDragger: ScrollBlockDragger,
+        metricsManager: ScrollMetricsManager,
+      },
       toolbox,
       scrollbars: true,
       sounds: true,
@@ -85,9 +94,11 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
       move: {
         scrollbars: { horizontal: true, vertical: true },
         drag: true,
-        wheel: true,
+        wheel: true, // Required for wheel scroll to work.
       },
     });
+    const plugin = new ScrollOptions(workspace);
+    plugin.init();
     workspaceRef.current = workspace;
     // create Play button (executes generated Python). It will notify subscribers with code.
     let playInstance: { init: () => void; dispose: () => void } | null = null;
