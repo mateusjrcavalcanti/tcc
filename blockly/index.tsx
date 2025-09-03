@@ -7,13 +7,16 @@ import React, {
   forwardRef,
 } from "react";
 import * as Blockly from "blockly";
+import * as PtBrModule from "blockly/msg/pt-br";
 import { pythonGenerator } from "blockly/python";
+import "blockly/msg/pt";
 import { toolbox } from "./toolbox";
 import { blocks } from "./blocks";
 import { forBlock } from "./generators";
 import "./styles.css";
 import { createPlayButton } from "./buttons/play";
 import { createBluetoothButton } from "./buttons/bluetooth";
+import { createCodeButton } from "./buttons/code";
 import { useBluetooth } from "../app/bluetooth-context";
 import {
   ScrollOptions,
@@ -21,6 +24,7 @@ import {
   ScrollMetricsManager,
 } from "@blockly/plugin-scroll-options";
 import { Multiselect } from "@mit-app-inventor/blockly-plugin-workspace-multiselect";
+import { registerContinuousToolbox } from "@blockly/continuous-toolbox";
 
 // Register blocks and generators
 Blockly.common.defineBlocks(blocks);
@@ -49,6 +53,29 @@ const draculaTheme = Blockly.Theme.defineTheme("dracula", {
   },
 });
 
+// Normalize possible module shapes (ESM default export or namespace) into a plain messages object
+function normalizeLocaleModule<T extends { [k: string]: string }>(
+  mod: unknown
+): T {
+  if (!mod) return {} as T;
+  // ESM default
+  if (
+    typeof mod === "object" &&
+    mod !== null &&
+    "default" in (mod as Record<string, unknown>)
+  ) {
+    const d = (mod as Record<string, unknown>).default;
+    if (typeof d === "object" && d !== null) return d as T;
+  }
+  // namespace / CJS
+  if (typeof mod === "object" && mod !== null) return mod as T;
+  return {} as T;
+}
+const PtBr = normalizeLocaleModule<{ [k: string]: string }>(PtBrModule);
+try {
+  Blockly.setLocale(PtBr);
+} catch {}
+
 // Assign our generators to the Python generator
 Object.assign(pythonGenerator.forBlock, forBlock);
 
@@ -66,6 +93,11 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
   // bluetooth hook must be called at top level of component
   const bt = useBluetooth();
   const btInstanceRef = useRef<{
+    init: () => void;
+    dispose: () => void;
+    render?: () => void;
+  } | null>(null);
+  const codeBtnRef = useRef<{
     init: () => void;
     dispose: () => void;
     render?: () => void;
@@ -104,7 +136,10 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
       plugins: {
         blockDragger: ScrollBlockDragger,
         metricsManager: ScrollMetricsManager,
+        flyoutsVerticalToolbox: "ContinuousFlyout",
+        toolbox: "ContinuousToolbox",
       },
+      renderer: "zelos",
       toolbox,
       scrollbars: true,
       sounds: true,
@@ -117,7 +152,7 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
         minScale: 0.3,
         scaleSpeed: 1.2,
       },
-      trashcan: true,
+      trashcan: false,
       theme: draculaTheme,
       move: {
         scrollbars: { horizontal: true, vertical: true },
@@ -129,7 +164,7 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
       multiFieldUpdate: true, // Keep the fields of multiple selected same-type blocks with the same value
       workspaceAutoFocus: true, // Auto focus the workspace when the mouse enters.
       multiselectIcon: {
-        hideIcon: false,
+        hideIcon: true,
         weight: 3,
         enabledIcon:
           "https://github.com/mit-cml/workspace-multiselect/raw/main/test/media/select.svg",
@@ -137,6 +172,7 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
           "https://github.com/mit-cml/workspace-multiselect/raw/main/test/media/unselect.svg",
       }, // Use custom icon for the multi select controls.
     };
+    registerContinuousToolbox();
     const workspace = Blockly.inject(containerRef.current, options);
 
     // Initialize plugins.
@@ -168,7 +204,7 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
     } catch {}
 
     // create Bluetooth button integrated with app Bluetooth context
-    // workspace created; bluetooth button will be created in separate effect
+    // workspace created; bluetooth and code buttons will be created in separate effects
 
     // Load saved state if any
     try {
@@ -215,6 +251,9 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
       } catch {}
       // btInstance is disposed in the other effect cleanup
       try {
+        codeBtnRef.current?.dispose();
+      } catch {}
+      try {
         workspace.dispose();
       } catch {}
     };
@@ -241,6 +280,9 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
           status: bt.status,
           deviceName: bt.device?.name ?? undefined,
         }),
+        // Alinhar no canto superior direito
+        rightOffset: 16,
+        topOffset: 12,
       });
       btInstanceRef.current = instance;
       instance.init();
@@ -260,6 +302,40 @@ const BlocklyEditor = forwardRef(function BlocklyEditor(
       btInstanceRef.current?.render?.();
     } catch {}
   }, [bt.status, bt.device]);
+
+  // create code button below the Bluetooth button
+  React.useEffect(() => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    try {
+      // dispose previous
+      try {
+        codeBtnRef.current?.dispose();
+      } catch {}
+      const instance = createCodeButton(ws, {
+        rightOffset: 16,
+        topOffset: 12, // alinhar ao topo (mesma linha dos outros botões)
+        getCode: () => {
+          try {
+            if (!ws) return "";
+            return pythonGenerator.workspaceToCode(ws);
+          } catch {
+            return "";
+          }
+        },
+      });
+      codeBtnRef.current = instance;
+      instance.init();
+      return () => {
+        try {
+          codeBtnRef.current?.dispose();
+        } catch {}
+        codeBtnRef.current = null;
+      };
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useImperativeHandle(ref, () => ({
     clear() {

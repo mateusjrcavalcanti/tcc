@@ -1,16 +1,8 @@
 "use client";
 import { Button } from "@/components/ui/button";
-import {
-  Play,
-  Download,
-  RotateCcw,
-  Home,
-  Save,
-  FolderOpen,
-} from "lucide-react";
+import { RotateCcw, Home, Save, FolderOpen } from "lucide-react";
 
 import BlocklyEditor from "@/blockly";
-import CodePanel from "@/components/code-panel";
 import { useRef } from "react";
 
 export default function EditorPage() {
@@ -30,24 +22,22 @@ export default function EditorPage() {
       <header className="bg-[#21222c] border-b border-[#44475a] px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button className="flex items-center gap-2 text-[#bd93f9] hover:text-[#f8f8f2] transition-colors p-2 rounded">
+            <button className="flex items-center gap-2 text-[#bd93f9] hover:text-[#f8f8f2] hover:bg-[#44475a] transition-colors p-2 rounded">
               <Home className="h-4 w-4" />
               <span className="text-sm">Home</span>
             </button>
-            <button className="flex items-center gap-2 text-[#f8f8f2] hover:text-[#bd93f9] transition-colors p-2 rounded">
+            <button className="flex items-center gap-2 text-[#f8f8f2] hover:text-[#bd93f9]  hover:bg-[#44475a] transition-colors p-2 rounded">
               <Save className="h-4 w-4" />
               <span className="text-sm">Salvar</span>
             </button>
-            <button className="flex items-center gap-2 text-[#f8f8f2] hover:text-[#bd93f9] transition-colors p-2 rounded">
+            <button className="flex items-center gap-2 text-[#f8f8f2] hover:text-[#bd93f9]  hover:bg-[#44475a] transition-colors p-2 rounded">
               <FolderOpen className="h-4 w-4" />
               <span className="text-sm">Abrir</span>
             </button>
-          </div>
-          <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
-              className="text-[#f8f8f2] hover:bg-[#44475a] gap-2"
+              className="text-[#f8f8f2] hover:text-[#bd93f9]  hover:bg-[#44475a] transition-colors p-2 rounded gap-2"
               onClick={() => {
                 try {
                   editorRef.current?.clear?.();
@@ -61,18 +51,8 @@ export default function EditorPage() {
               <RotateCcw className="h-4 w-4" />
               Limpar
             </Button>
-            <Button
-              size="sm"
-              className="bg-[#bd93f9] text-[#282a36] hover:bg-[#bd93f9]/90 gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Baixar
-            </Button>
-            <Button className="bg-[#50fa7b] text-[#282a36] hover:bg-[#50fa7b]/90 gap-2">
-              <Play className="h-4 w-4" />
-              Executar
-            </Button>
           </div>
+          <div className="flex items-center gap-2"></div>
         </div>
       </header>
 
@@ -80,8 +60,8 @@ export default function EditorPage() {
       <div className="flex flex-1 h-full overflow-hidden">
         <div className="bg-[#282a36] h-full min-h-0 min-w-0 transition-all duration-300 relative flex-1">
           <BlocklyEditor ref={editorRef} className="h-full w-full" />
+          {/* Botão de código agora é gerenciado diretamente pelo Blockly (createCodeButton). */}
         </div>
-        <CodePanel editorRef={editorRef} className="" />
       </div>
     </div>
   );

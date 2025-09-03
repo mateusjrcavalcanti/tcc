@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@blockly/continuous-toolbox": "^7.0.2",
     "@blockly/plugin-scroll-options": "^7.0.2",
     "@mit-app-inventor/blockly-plugin-workspace-multiselect": "^1.0.1",
     "@radix-ui/react-dialog": "^1.1.15",

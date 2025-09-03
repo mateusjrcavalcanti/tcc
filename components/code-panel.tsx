@@ -1,7 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ChevronRight, ChevronLeft } from "lucide-react";
+import { FileCode } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 type EditorRef = {
   getCode?: () => string;
@@ -15,7 +22,7 @@ type Props = {
 };
 
 export default function CodePanel({ editorRef, className = "" }: Props) {
-  const [visible, setVisible] = useState(false);
+  const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
 
   useEffect(() => {
@@ -38,46 +45,32 @@ export default function CodePanel({ editorRef, className = "" }: Props) {
   }, [editorRef]);
 
   return (
-    <>
-      {visible && (
-        <div
-          className={`w-96 flex-shrink-0 bg-[#21222c] border-l border-[#44475a] flex flex-col h-full animate-in slide-in-from-right duration-300 ${className}`}
-        >
-          <div className="bg-[#191a21] px-4 py-2 border-b border-[#44475a] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-[#ff5555]"></div>
-              <div className="w-3 h-3 rounded-full bg-[#f1fa8c]"></div>
-              <div className="w-3 h-3 rounded-full bg-[#50fa7b]"></div>
-              <span className="ml-2 text-sm text-[#f8f8f2]">main.py</span>
-            </div>
+    <div className={className}>
+      {/* Botão flutuante abaixo do botão de Bluetooth (que está ancorado em top-right) */}
+      <div className="absolute right-4 z-20" style={{ top: 72 }}>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
             <button
-              onClick={() => setVisible(false)}
-              className="text-[#6272a4] hover:text-[#f8f8f2] transition-colors p-1 rounded hover:bg-[#44475a]"
-              title="Ocultar painel de código"
+              className="bg-[#1f2937] hover:bg-[#374151] text-[#f8f8f2] px-3 py-2 rounded-md shadow-lg transition-colors flex items-center gap-2"
+              title="Ver código gerado"
             >
-              <ChevronRight className="h-4 w-4" />
+              <FileCode className="h-4 w-4" />
+              Código
             </button>
-          </div>
-          <div className="flex-1 p-4 overflow-auto">
-            <pre className="text-sm text-[#f8f8f2] font-mono leading-relaxed">
-              {code ||
-                "# Arraste blocos para gerar código Python aqui\n# O código aparecerá automaticamente"}
-            </pre>
-          </div>
-        </div>
-      )}
-
-      {!visible && (
-        <div className="absolute top-16 right-4 z-10">
-          <button
-            onClick={() => setVisible(true)}
-            className="bg-[#44475a] hover:bg-[#6272a4] text-[#f8f8f2] p-2 rounded shadow-lg transition-colors"
-            title="Mostrar painel de código"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-    </>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[800px] bg-[#21222c] text-[#f8f8f2] border border-[#44475a]">
+            <DialogHeader>
+              <DialogTitle>main.py</DialogTitle>
+            </DialogHeader>
+            <div className="max-h-[70vh] overflow-auto">
+              <pre className="text-sm font-mono leading-relaxed whitespace-pre-wrap">
+                {code ||
+                  "# Arraste blocos para gerar código Python aqui\n# O código aparecerá automaticamente"}
+              </pre>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
   );
 }

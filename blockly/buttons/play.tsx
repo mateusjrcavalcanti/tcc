@@ -1,115 +1,231 @@
-import * as Blockly from "blockly";
+import * as Blockly from "blockly/core";
 import { pythonGenerator } from "blockly/python";
 
-type Options = {
+const WIDTH = 48;
+const HEIGHT = 48;
+const MARGIN_VERTICAL = 20;
+const MARGIN_HORIZONTAL = 20;
+
+type PlayButtonOptions = {
   onExecute?: (code: string) => void;
-  // URL para um ícone (opcional). Se não fornecido, usa um triângulo simples via CSS.
   iconUrl?: string;
+  topOffset?: number;
+  rightOffset?: number;
+  weight?: number;
 };
 
-/**
- * Cria um botão "play" reutilizável dentro do workspace do Blockly.
- * - Gera código Python com o pythonGenerator e chama onExecute(code)
- * - Retorna { init(), dispose() }
- */
-export function createPlayButton(
-  workspace: Blockly.Workspace,
-  opts: Options = {}
-) {
-  let buttonEl: HTMLDivElement | null = null;
-  const onExecute = opts.onExecute;
+export class PlayButton {
+  private workspace_: Blockly.WorkspaceSvg;
+  private svgGroup_: SVGGElement | null = null;
+  private initialized_ = false;
+  private top_ = 0;
+  private left_ = 0;
+  private topOffset_ = 12; // alinhar ao restante dos botões por padrão
+  private rightOffset_ = MARGIN_HORIZONTAL;
+  private weight_ = 4; // abaixo do Bluetooth (5) e acima do CodeButton (3)
 
-  function createDom() {
-    const el = document.createElement("div");
-    el.className = "blockly-play-button";
-    el.style.width = "44px";
-    el.style.height = "44px";
-    el.style.borderRadius = "8px";
-    el.style.display = "flex";
-    el.style.alignItems = "center";
-    el.style.justifyContent = "center";
-    el.style.cursor = "pointer";
-    el.style.background = "#50fa7b";
-    el.style.boxShadow = "0 6px 18px rgba(0,0,0,0.25)";
-    el.title = "Executar (gerar código Python)";
+  id = "playButton";
 
-    if (opts.iconUrl) {
-      el.style.background = `url('${opts.iconUrl}') no-repeat center`;
-      el.style.backgroundSize = "22px 22px";
+  constructor(
+    workspace: Blockly.WorkspaceSvg,
+    private opts: PlayButtonOptions = {}
+  ) {
+    this.workspace_ = workspace;
+    if (typeof opts.topOffset === "number") this.topOffset_ = opts.topOffset;
+    if (typeof opts.rightOffset === "number")
+      this.rightOffset_ = opts.rightOffset;
+    if (typeof opts.weight === "number") this.weight_ = opts.weight;
+  }
+
+  createDom(): SVGElement {
+    this.svgGroup_ = Blockly.utils.dom.createSvgElement(
+      Blockly.utils.Svg.G,
+      { class: "blocklyPlayButton" },
+      null
+    );
+
+    // fundo
+    Blockly.utils.dom.createSvgElement(
+      Blockly.utils.Svg.RECT,
+      {
+        width: WIDTH,
+        height: HEIGHT,
+        rx: HEIGHT / 2, // circular
+        ry: HEIGHT / 2,
+        fill: "#50fa7b",
+        stroke: "#2aa561",
+      },
+      this.svgGroup_
+    );
+
+    if (this.opts.iconUrl) {
+      // ícone via image
+      Blockly.utils.dom.createSvgElement(
+        Blockly.utils.Svg.IMAGE,
+        {
+          href: this.opts.iconUrl,
+          x: 8,
+          y: 8,
+          width: 32,
+          height: 32,
+          style: "pointer-events:none",
+        },
+        this.svgGroup_
+      );
     } else {
-      // ícone play simples (triângulo) via CSS
-      const tri = document.createElement("div");
-      tri.style.width = "0";
-      tri.style.height = "0";
-      tri.style.borderLeft = "12px solid #282a36";
-      tri.style.borderTop = "8px solid transparent";
-      tri.style.borderBottom = "8px solid transparent";
-      el.appendChild(tri);
+      // triângulo play
+      const points = [
+        [16, 14],
+        [16, 34],
+        [34, 24],
+      ]
+        .map((p) => p.join(","))
+        .join(" ");
+      Blockly.utils.dom.createSvgElement(
+        Blockly.utils.Svg.POLYGON,
+        { points, fill: "#1f2937" },
+        this.svgGroup_
+      );
     }
 
-    el.addEventListener("click", () => {
+    // click handler
+    this.svgGroup_.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       try {
-        const code = pythonGenerator.workspaceToCode(workspace);
-        if (onExecute) {
-          try {
-            onExecute(code);
-          } catch (e) {
-            // se callback falhar, entregar fallback
-            console.error("play button onExecute error", e);
-            alert("Erro ao executar o callback do Play: " + String(e));
-          }
-        } else {
-          // comportamento padrão: mostrar o código em uma janela
-          if (!code || !code.trim()) {
-            alert("Nenhum código gerado.");
-          } else {
-            // abre em nova janela/aba com o código (apenas para debug)
+        const code = pythonGenerator.workspaceToCode(this.workspace_);
+        if (this.opts.onExecute) this.opts.onExecute(code);
+        else {
+          if (!code || !code.trim()) alert("Nenhum código gerado.");
+          else {
             const blob = new Blob([code], { type: "text/x-python" });
             const url = URL.createObjectURL(blob);
             window.open(url, "_blank");
             setTimeout(() => URL.revokeObjectURL(url), 5000);
           }
         }
-      } catch (e) {
-        console.error(e);
-        alert("Erro ao gerar código Python: " + String(e));
+      } catch (err) {
+        console.error(err);
+        alert("Erro ao gerar código Python: " + String(err));
       }
     });
 
-    return el;
+    return this.svgGroup_;
   }
 
-  function position() {
-    if (!buttonEl) return;
+  init(hideIcon?: boolean, weight?: number) {
+    if (!hideIcon) {
+      this.workspace_.getComponentManager().addComponent({
+        component: this,
+        weight: typeof weight === "number" ? weight : this.weight_,
+        capabilities: [Blockly.ComponentManager.Capability.POSITIONABLE],
+      });
+    }
+    // garantir DOM
     try {
-      // posicione no canto inferior direito do workspace pai
-      buttonEl.style.position = "absolute";
-      buttonEl.style.right = "16px";
-      buttonEl.style.bottom = "16px";
-      buttonEl.style.zIndex = "12";
-    } catch {
-      // ignore
+      if (!this.svgGroup_) {
+        const parent = this.workspace_.getParentSvg();
+        if (parent) parent.appendChild(this.createDom());
+      }
+    } catch {}
+    this.initialized_ = true;
+    this.workspace_.resize();
+  }
+
+  dispose() {
+    try {
+      this.workspace_.getComponentManager().removeComponent(this.id);
+    } catch {}
+    if (this.svgGroup_) Blockly.utils.dom.removeNode(this.svgGroup_);
+    this.svgGroup_ = null;
+  }
+
+  getBoundingRectangle(): Blockly.utils.Rect | null {
+    const bottom = this.top_ + HEIGHT;
+    const right = this.left_ + WIDTH;
+    return new Blockly.utils.Rect(this.top_, bottom, this.left_, right);
+  }
+
+  position(
+    metrics: Blockly.MetricsManager.UiMetrics,
+    savedPositions: Blockly.utils.Rect[]
+  ) {
+    if (!this.initialized_) return;
+    // Forçar posição no canto superior direito
+    const cornerPosition = {
+      horizontal: Blockly.uiPosition.horizontalPosition.RIGHT,
+      vertical: Blockly.uiPosition.verticalPosition.TOP,
+    } as const;
+    const startRect = Blockly.uiPosition.getStartPositionRect(
+      cornerPosition,
+      new Blockly.utils.Size(WIDTH, HEIGHT),
+      this.rightOffset_ ?? MARGIN_HORIZONTAL,
+      this.topOffset_ ?? MARGIN_VERTICAL,
+      metrics,
+      this.workspace_
+    );
+
+    // posicionamento lateral: tentar colocar ao lado (para a esquerda) de itens já salvos
+    const SPACING = 8;
+    const posTop = startRect.top;
+    let posLeft = startRect.left;
+
+    // iterativamente, se houver colisão vertical com um savedPosition que ocupa espaço
+    // na mesma faixa, shift para esquerda desse savedPosition até não colidir
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const r of savedPositions) {
+        // checa sobreposição vertical
+        if (!(posTop + HEIGHT <= r.top || posTop >= r.bottom)) {
+          // se houver interseção horizontal também, deslocar para a esquerda do r
+          if (posLeft < r.right && posLeft + WIDTH > r.left) {
+            posLeft = r.left - SPACING - WIDTH;
+            changed = true;
+          }
+        }
+      }
+    }
+
+    this.top_ = posTop;
+    this.left_ = posLeft;
+    if (this.svgGroup_) {
+      this.svgGroup_.setAttribute(
+        "transform",
+        `translate(${this.left_},${this.top_})`
+      );
     }
   }
-
-  function init() {
-    // workspace.getParentSvg não está tipado em TS; usar cast mais restrito
-    const parent = (
-      workspace as unknown as { getParentSvg?: () => SVGElement }
-    ).getParentSvg?.()?.parentNode as HTMLElement | null;
-    if (!parent) return;
-    buttonEl = createDom();
-    parent.appendChild(buttonEl);
-    position();
-    window.addEventListener("resize", position);
-  }
-
-  function dispose() {
-    window.removeEventListener("resize", position);
-    if (buttonEl && buttonEl.parentNode)
-      buttonEl.parentNode.removeChild(buttonEl);
-    buttonEl = null;
-  }
-
-  return { init, dispose };
 }
+
+/**
+ * Fábrica compatível com a anterior, agora usando ComponentManager.
+ */
+export function createPlayButton(
+  workspace: Blockly.Workspace,
+  opts: PlayButtonOptions = {}
+) {
+  let instance: PlayButton | null = null;
+  return {
+    init() {
+      try {
+        instance = new PlayButton(
+          workspace as unknown as Blockly.WorkspaceSvg,
+          opts
+        );
+        instance.init(false, opts.weight);
+      } catch {}
+    },
+    dispose() {
+      try {
+        instance?.dispose();
+      } catch {}
+      instance = null;
+    },
+  };
+}
+
+Blockly.Css.register(`
+.blocklyPlayButton>rect { cursor: pointer; }
+.blocklyPlayButton:hover>rect { filter: brightness(0.95); }
+`);

@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "typecheck-www",
+			"type": "shell",
+			"command": "npm run -s lint && npx -y tsc -p tsconfig.json --noEmit",
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"group": "build"
+		}
+	]
+}

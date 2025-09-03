@@ -1,0 +1,93 @@
+export const controlBlocks = [
+  {
+    type: "control_wait",
+    message0: "esperar %1 segundos",
+    args0: [{ type: "input_value", name: "DURATION", check: "Number" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "controls_repeat_ext",
+    message0: "repetir %1 vezes %2 fazer %3",
+    args0: [
+      { type: "input_value", name: "TIMES", check: "Number" },
+      { type: "input_dummy" },
+      { type: "input_statement", name: "DO" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "control_forever",
+    message0: "para sempre %1",
+    args0: [{ type: "input_statement", name: "DO" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "controls_if",
+    message0: "se %1 então %2",
+    args0: [
+      { type: "input_value", name: "IF0" },
+      { type: "input_statement", name: "DO0" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "controls_if_else",
+    message0: "se %1 então %2 senão %3",
+    args0: [
+      { type: "input_value", name: "IF0" },
+      { type: "input_statement", name: "DO0" },
+      { type: "input_statement", name: "ELSE" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "control_wait_until",
+    message0: "esperar até %1",
+    args0: [{ type: "input_value", name: "CONDITION" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "controls_whileUntil",
+    message0: "enquanto %1 faça %2",
+    args0: [
+      {
+        type: "field_dropdown",
+        name: "MODE",
+        options: [
+          ["Enquanto", "WHILE"],
+          ["Até", "UNTIL"],
+        ],
+      },
+      { type: "input_value", name: "BOOL" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "control_stop_other_scripts",
+    message0: "parar outros scripts",
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+  {
+    type: "control_stop",
+    message0: "parar",
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#FF9800",
+  },
+];

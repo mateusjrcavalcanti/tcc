@@ -1,5 +1,5 @@
 svg[display="none"] {
-    display: none;
+  display: none;
 }
 
 .blockly-workspace {
@@ -19,9 +19,32 @@ svg[display="none"] {
 }
 
 .blocklyToolboxCategory {
-  margin-top: 20px;
+  margin-top: 10px;
 }
 
 .categoryBubble {
-   margin-bottom: 12px;
+  margin-bottom: 5px;
+}
+
+/* Force Sour Gummy inside Blockly UI (SVG and overlay DOM elements) */
+.blocklySvg,
+.blocklyDiv,
+.blocklyWidgetDiv,
+.blocklyToolboxDiv,
+.blocklyToolbox,
+.blocklyFlyout,
+.blocklyTooltipDiv,
+.blocklyCodeButton,
+.blocklyPlayButton,
+.blocklyBluetoothButton,
+.blocklyToolboxCategoryLabel,
+.blocklyToolbox .blocklyTreeLabel,
+.blocklyToolbox .blocklyTreeLabel *,
+.blocklyFlyout .blocklyTreeLabel,
+.blocklyFlyout .blocklyTreeLabel *,
+.blocklyToolboxDiv *,
+.blocklyFlyout *,
+.blocklySvg *,
+.blocklyDiv * {
+  font-family: var(--font-sour-gummy) !important;
 }

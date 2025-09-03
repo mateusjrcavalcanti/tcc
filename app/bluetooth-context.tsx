@@ -19,6 +19,17 @@ interface BluetoothContextType {
   connect: () => Promise<void>;
   disconnect: () => void;
   clearError: () => void;
+  // new GATT helpers
+  wifiSet: (ssid: string, psk?: string | null) => Promise<any>;
+  storageList: (path?: string) => Promise<any>;
+  storageRead: (path: string) => Promise<Uint8Array | string>;
+  storageWrite: (path: string, base64Data: string, overwrite?: boolean) => Promise<any>;
+  storageDelete: (path: string) => Promise<any>;
+  storageMkdir: (path: string) => Promise<any>;
+  scriptStart: (filename: string) => Promise<any>;
+  scriptChunk: (base64Chunk: string) => Promise<any>;
+  scriptRun: (path: string) => Promise<any>;
+  wifiStatus: () => Promise<any>;
 }
 
 const BluetoothContext = createContext<BluetoothContextType | undefined>(
@@ -33,6 +44,28 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
   const [error, setError] = useState<string | null>(null);
   const manualDisconnectRef = React.useRef(false);
   const reconnectingRef = React.useRef(false);
+
+  // cache de characteristics por uuid
+  const charCache = React.useRef<Map<string, BluetoothRemoteGATTCharacteristic>>(new Map());
+
+  const GATT = React.useMemo(() => ({
+    WIFI_SERVICE: "22345678-1234-5678-1234-56789abcde00",
+    WIFI_SSID: "22345678-1234-5678-1234-56789abcde01",
+    WIFI_PASS: "22345678-1234-5678-1234-56789abcde02",
+    WIFI_STATUS: "22345678-1234-5678-1234-56789abcde03",
+
+    SCRIPT_SERVICE: "32345678-1234-5678-1234-56789abcde00",
+    SCRIPT_WRITE: "32345678-1234-5678-1234-56789abcde01",
+    SCRIPT_STATUS: "32345678-1234-5678-1234-56789abcde02",
+    SCRIPT_RUN: "32345678-1234-5678-1234-56789abcde03",
+
+    FS_SERVICE: "42345678-1234-5678-1234-56789abcde00",
+    FS_LIST: "42345678-1234-5678-1234-56789abcde01",
+    FS_READ: "42345678-1234-5678-1234-56789abcde02",
+    FS_WRITE: "42345678-1234-5678-1234-56789abcde03",
+    FS_DELETE: "42345678-1234-5678-1234-56789abcde04",
+    FS_MKDIR: "42345678-1234-5678-1234-56789abcde05",
+  }), []);
 
   const connect = useCallback(async () => {
     try {
@@ -52,7 +85,11 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [], // Adicione serviços necessários aqui
+        optionalServices: [
+          GATT.WIFI_SERVICE,
+          GATT.SCRIPT_SERVICE,
+          GATT.FS_SERVICE,
+        ], // solicitar serviços usados
       });
 
       setDevice(device);
@@ -90,7 +127,8 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
       toast.error(message);
       console.error("Erro ao conectar ao Bluetooth:", err);
     }
-  }, []);
+  }, [GATT]);
+
   // tenta reconectar com retries exponenciais
   const attemptReconnect = React.useCallback(
     async (maxRetries = 3) => {
@@ -214,9 +252,195 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const clearError = useCallback(() => setError(null), []);
 
+  // --- GATT helpers ---
+  const ensureConnectedGatt = useCallback(async () => {
+    if (!device) throw new Error("Nenhum dispositivo selecionado");
+    if (!device.gatt) throw new Error("GATT não disponível neste dispositivo");
+    if (!device.gatt.connected) {
+      await device.gatt.connect();
+    }
+    return device.gatt;
+  }, [device]);
+
+  const getCharacteristic = useCallback(
+    async (serviceUuid: string, charUuid: string) => {
+      const cacheKey = `${serviceUuid}|${charUuid}`;
+      const cached = charCache.current.get(cacheKey);
+      if (cached) return cached;
+      const gatt = await ensureConnectedGatt();
+      const service = await gatt.getPrimaryService(serviceUuid);
+      const characteristic = await service.getCharacteristic(charUuid);
+      charCache.current.set(cacheKey, characteristic);
+      return characteristic;
+    },
+    [ensureConnectedGatt]
+  );
+
+  const readTextFromChar = useCallback(async (serviceUuid: string, charUuid: string) => {
+    const c = await getCharacteristic(serviceUuid, charUuid);
+    const v = await c.readValue();
+    const arr = new Uint8Array(v.buffer);
+    // tentar decodificar como UTF-8; se falhar, retornar base64
+    try {
+      const decoded = new TextDecoder().decode(arr);
+      return decoded;
+    } catch {
+      // fallback para base64
+      const b64 = btoa(String.fromCharCode(...arr));
+      return b64;
+    }
+  }, [getCharacteristic]);
+
+  const writeToChar = useCallback(async (serviceUuid: string, charUuid: string, data: ArrayBuffer | Uint8Array) => {
+    const c = await getCharacteristic(serviceUuid, charUuid);
+    // garantir BufferSource (usamos Uint8Array)
+    let buf: Uint8Array;
+    if (data instanceof Uint8Array) buf = data;
+    else if (data instanceof ArrayBuffer) buf = new Uint8Array(data);
+    else buf = new Uint8Array((data as any).buffer as ArrayBuffer);
+    // writeValue typing in some TS configs expects ArrayBuffer; cast to any to avoid lib mismatch
+    await c.writeValue(buf as any);
+  }, [getCharacteristic]);
+
+  const writeJson = useCallback(async (serviceUuid: string, charUuid: string, obj: any) => {
+    const s = JSON.stringify(obj);
+    const bytes = new TextEncoder().encode(s);
+    await writeToChar(serviceUuid, charUuid, bytes);
+  }, [writeToChar]);
+
+  // small helper to convert base64 -> Uint8Array
+  const base64ToUint8 = useCallback((b64: string) => {
+    const bin = atob(b64);
+    const len = bin.length;
+    const arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }, []);
+
+  // --- exposed APIs (WiFi / Storage / Script) ---
+  const wifiSet = useCallback(async (ssid: string, psk?: string | null) => {
+    // write SSID then passphrase (if provided)
+    await writeToChar(GATT.WIFI_SERVICE, GATT.WIFI_SSID, new TextEncoder().encode(ssid));
+    if (psk !== undefined && psk !== null) {
+      await writeToChar(GATT.WIFI_SERVICE, GATT.WIFI_PASS, new TextEncoder().encode(psk));
+    }
+    // optional: read status
+    try {
+      const status = await readTextFromChar(GATT.WIFI_SERVICE, GATT.WIFI_STATUS);
+      return status;
+    } catch {
+      return null;
+    }
+  }, [GATT, writeToChar, readTextFromChar]);
+
+  const storageList = useCallback(async (path = "") => {
+    // FS_LIST is a read characteristic; some implementations ignore path and always list root
+    try {
+      // if path provided, try writing to FS_READ first as many server implementations expect that
+      if (path) {
+        await writeJson(GATT.FS_SERVICE, GATT.FS_READ, { path });
+      }
+      const txt = await readTextFromChar(GATT.FS_SERVICE, GATT.FS_LIST);
+      try {
+        return JSON.parse(typeof txt === "string" ? txt : new TextDecoder().decode(txt as any));
+      } catch {
+        return txt;
+      }
+    } catch (e) {
+      throw e;
+    }
+  }, [GATT, writeJson, readTextFromChar]);
+
+  const storageRead = useCallback(async (path: string) => {
+    // write {path} to FS_READ then read its value
+    await writeJson(GATT.FS_SERVICE, GATT.FS_READ, { path });
+    // read back
+    const val = await getCharacteristic(GATT.FS_SERVICE, GATT.FS_READ).then(async (c) => {
+      const v = await c.readValue();
+      const arr = new Uint8Array(v.buffer);
+      // tentar decodificar texto
+      try {
+        return new TextDecoder().decode(arr);
+      } catch {
+        return arr; // retornar bytes
+      }
+    });
+    return val;
+  }, [GATT, writeJson, getCharacteristic]);
+
+  const storageWrite = useCallback(async (path: string, base64Data: string, overwrite = true) => {
+    const payload = { path, data: base64Data, overwrite };
+    await writeJson(GATT.FS_SERVICE, GATT.FS_WRITE, payload);
+    // não há char dedicado para resposta; retornar ok quando escrita completar
+    return { ok: true };
+  }, [GATT, writeJson]);
+
+  const storageDelete = useCallback(async (path: string) => {
+    await writeJson(GATT.FS_SERVICE, GATT.FS_DELETE, { path });
+    return { ok: true };
+  }, [GATT, writeJson]);
+
+  const storageMkdir = useCallback(async (path: string) => {
+    await writeJson(GATT.FS_SERVICE, GATT.FS_MKDIR, { path });
+    return { ok: true };
+  }, [GATT, writeJson]);
+
+  const scriptStart = useCallback(async (filename: string) => {
+    // send JSON start header
+    await writeJson(GATT.SCRIPT_SERVICE, GATT.SCRIPT_WRITE, { type: "start", filename });
+    // read status char for session id
+    const status = await readTextFromChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_STATUS);
+    try {
+      return JSON.parse(String(status));
+    } catch {
+      return status;
+    }
+  }, [GATT, writeJson, readTextFromChar]);
+
+  const scriptChunk = useCallback(async (base64Chunk: string) => {
+    const bytes = base64ToUint8(base64Chunk);
+    await writeToChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_WRITE, bytes);
+    // read status
+    const status = await readTextFromChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_STATUS);
+    try { return JSON.parse(String(status)); } catch { return status; }
+  }, [GATT, base64ToUint8, writeToChar, readTextFromChar]);
+
+  const scriptRun = useCallback(async (path: string) => {
+    await writeToChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_RUN, new TextEncoder().encode(path));
+    const status = await readTextFromChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_STATUS);
+    try { return JSON.parse(String(status)); } catch { return status; }
+  }, [GATT, writeToChar, readTextFromChar]);
+
+  const wifiStatus = useCallback(async () => {
+    const txt = await readTextFromChar(GATT.WIFI_SERVICE, GATT.WIFI_STATUS);
+    try {
+      return JSON.parse(typeof txt === "string" ? txt : new TextDecoder().decode(txt as any));
+    } catch {
+      return txt;
+    }
+  }, [GATT, readTextFromChar]);
+
   return (
     <BluetoothContext.Provider
-      value={{ device, status, error, connect, disconnect, clearError }}
+      value={{
+        device,
+        status,
+        error,
+        connect,
+        disconnect,
+        clearError,
+        // exposed helpers
+        wifiSet,
+        storageList,
+        storageRead,
+        storageWrite,
+        storageDelete,
+        storageMkdir,
+        scriptStart,
+        scriptChunk,
+        scriptRun,
+        wifiStatus,
+      }}
     >
       {children}
     </BluetoothContext.Provider>

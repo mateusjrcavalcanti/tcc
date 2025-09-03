@@ -1,0 +1,61 @@
+import { RotateCw } from "lucide-react";
+
+export const motorBlocks = [
+  {
+    type: "motor_run_for_duration",
+    message0: "Motor: rodar por %1",
+    args0: [{ type: "input_value", name: "DURATION", check: "Number" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+  {
+    type: "motor_go_shortest_path",
+    message0: "Motor: ir pelo caminho mais curto",
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+  {
+    type: "motor_start",
+    message0: "Motor: iniciar %1",
+    args0: [{ type: "input_value", name: "SPEED", check: "Number" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+  {
+    type: "motor_stop",
+    message0: "Motor: parar",
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+  {
+    type: "motor_set_speed",
+    message0: "Motor: definir velocidade %1",
+    args0: [{ type: "input_value", name: "SPEED", check: "Number" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+  {
+    type: "motor_position",
+    message0: "Motor: posição",
+    output: "Number",
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+  {
+    type: "motor_velocity",
+    message0: "Motor: velocidade",
+    output: "Number",
+    colour: "#4A90E2",
+    icon: { Icon: RotateCw, bg: "#4A90E2", alt: "Motor" },
+  },
+];
