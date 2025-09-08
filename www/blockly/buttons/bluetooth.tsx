@@ -139,14 +139,12 @@ export class BluetoothButton {
     this.svgGroup_.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      // on click, toggle connect/disconnect based on status
+      // on click, open Bluetooth status dialog in the React UI
       try {
-        const st = this.opts.getStatus?.()?.status ?? "idle";
-        if (st === "connected") {
-          void this.opts.onDisconnect?.();
-        } else {
-          void this.opts.onConnect?.();
-        }
+        const ev = new CustomEvent("open-bluetooth-dialog", {
+          detail: { from: "blockly-button" },
+        });
+        document.dispatchEvent(ev);
       } catch {}
     });
 
