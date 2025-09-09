@@ -1,9 +1,7 @@
 # syntax=docker/dockerfile:1.4
-
-FROM arm32v7/debian:bookworm-slim
+FROM arm64v8/debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-
 WORKDIR /src
 
 # Instalar pacotes do sistema
@@ -23,7 +21,7 @@ COPY hub/requirements.txt .
 RUN python3 -m venv /opt/venv \
   && /opt/venv/bin/python -m pip install --upgrade pip setuptools wheel
 
-# Instalar dependências com cache de pip
+# Instalar dependências com cache pip
 RUN --mount=type=cache,target=/root/.cache/pip \
   /opt/venv/bin/pip install -r requirements.txt \
   && /opt/venv/bin/pip install pyinstaller
@@ -34,7 +32,7 @@ COPY . /src
 # Criar diretório de saída
 RUN mkdir -p /src/dist
 
-# Gerar executável
+# Gerar executável ARM64 para Pi Zero 2W 64-bit
 RUN /opt/venv/bin/pyinstaller --clean --onefile hub/main.py \
     -n hub-pi-zero-2w \
     --add-data "hub/storage:storage" \
