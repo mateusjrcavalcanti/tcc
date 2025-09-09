@@ -66,7 +66,9 @@ def get_first_adapter_path(bus: SystemBus) -> Optional[str]:
 
 def set_adapter_alias(bus: SystemBus, adapter_path: str, alias: str):
     try:
-        props = bus.get(PROPERTIES_IFACE, adapter_path)
+        # Obter o objeto do BlueZ (service org.bluez) no caminho do adaptador
+        # e acessar explicitamente a interface org.freedesktop.DBus.Properties
+        props = bus.get(BLUEZ_SERVICE, adapter_path)[PROPERTIES_IFACE]
         props.Set(ADAPTER_IFACE, 'Alias', alias)
         print(f"Alias do adaptador definido para: {alias}")
     except Exception as e:
@@ -90,7 +92,8 @@ def ensure_pairable_discoverable(bus: SystemBus, adapter_path: Optional[str]):
         print("Existe dispositivo conectado — não alterando estado de pairing/discovery.")
         return
     try:
-        props = bus.get(PROPERTIES_IFACE, adapter_path)
+        # Mesma correção: obter o proxy do BlueZ e acessar a interface Properties
+        props = bus.get(BLUEZ_SERVICE, adapter_path)[PROPERTIES_IFACE]
         # tornar pareable e discoverable indefinidamente
         props.Set(ADAPTER_IFACE, 'Pairable', True)
         props.Set(ADAPTER_IFACE, 'Discoverable', True)
@@ -112,8 +115,9 @@ def main(argv=None):
     agent_path = "/org/bluez/agent_simple"
     agent = Agent()
     bus = SystemBus()
-    # Exporta o agente no barramento
-    bus.publish(agent_path, agent)
+    # Exporta o agente no barramento: registrar o objeto D-Bus no caminho
+    # Use register_object para expor o agente (publish exigiria um bus name válido)
+    registration = bus.register_object(agent_path, agent)
     try:
         mgr = bus.get(BLUEZ_SERVICE, "/org/bluez")
         # AgentManager1 interface
