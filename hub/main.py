@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Any, Optional
 from pydbus import SystemBus
-from gi.repository import GLib
 
 class Agent:
 
@@ -43,7 +42,6 @@ class Agent:
 
 
 BLUEZ_SERVICE = "org.bluez"
-OBJECT_MANAGER_IFACE = "org.freedesktop.DBus.ObjectManager"
 ADAPTER_IFACE = "org.bluez.Adapter1"
 DEVICE_IFACE = "org.bluez.Device1"
 PROPERTIES_IFACE = "org.freedesktop.DBus.Properties"
@@ -65,7 +63,7 @@ def get_first_adapter_path(bus: SystemBus) -> Optional[str]:
 def set_adapter_alias(bus: SystemBus, adapter_path: str, alias: str):
     try:
         props = bus.get(BLUEZ_SERVICE, adapter_path)[PROPERTIES_IFACE]
-        props.Set(ADAPTER_IFACE, 'Alias', GLib.Variant('s', alias))
+        props.Set(ADAPTER_IFACE, 'Alias', alias)
         print(f"Alias do adaptador definido para: {alias}")
     except Exception as e:
         print(f"Falha ao alterar alias do adaptador: {e}")
@@ -89,9 +87,9 @@ def ensure_pairable_discoverable(bus: SystemBus, adapter_path: Optional[str]):
         return
     try:
         props = bus.get(BLUEZ_SERVICE, adapter_path)[PROPERTIES_IFACE]
-        props.Set(ADAPTER_IFACE, 'Pairable', GLib.Variant('b', True))
-        props.Set(ADAPTER_IFACE, 'Discoverable', GLib.Variant('b', True))
-        props.Set(ADAPTER_IFACE, 'DiscoverableTimeout', GLib.Variant('u', 0))
+        props.Set(ADAPTER_IFACE, 'Pairable', True)
+        props.Set(ADAPTER_IFACE, 'Discoverable', True)
+        props.Set(ADAPTER_IFACE, 'DiscoverableTimeout', 0)
         print("Adaptador configurado para Pairable/Discoverable (timeout=0).")
     except Exception as e:
         print(f"Falha ao configurar discoverable/pairable: {e}")
@@ -121,9 +119,11 @@ def main(argv=None):
     except Exception as e:
         print(f"Falha ao registrar agent: {e}")
 
-    loop = GLib.MainLoop()
+    # Loop simples para manter o script vivo
     try:
-        loop.run()
+        import time
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         print("Encerrando agente...")
         try:
