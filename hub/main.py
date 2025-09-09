@@ -21,7 +21,6 @@ class Agent:
 
     def RequestPasskey(self, device):
         print(f"RequestPasskey for {device}")
-        # Retornar int simples; evita dependência do módulo `dbus`.
         return 0
 
     def DisplayPasskey(self, device, passkey, entered):
@@ -29,7 +28,6 @@ class Agent:
 
     def RequestConfirmation(self, device, passkey):
         print(f"RequestConfirmation for {device}: {passkey} - auto-aceitar")
-        # Aceitar automaticamente
         return
 
     def RequestAuthorization(self, device):
@@ -66,10 +64,8 @@ def get_first_adapter_path(bus: SystemBus) -> Optional[str]:
 
 def set_adapter_alias(bus: SystemBus, adapter_path: str, alias: str):
     try:
-        # Obter o objeto do BlueZ (service org.bluez) no caminho do adaptador
-        # e acessar explicitamente a interface org.freedesktop.DBus.Properties
         props = bus.get(BLUEZ_SERVICE, adapter_path)[PROPERTIES_IFACE]
-        props.Set(ADAPTER_IFACE, 'Alias', alias)
+        props.Set(ADAPTER_IFACE, 'Alias', GLib.Variant('s', alias))
         print(f"Alias do adaptador definido para: {alias}")
     except Exception as e:
         print(f"Falha ao alterar alias do adaptador: {e}")
@@ -92,35 +88,32 @@ def ensure_pairable_discoverable(bus: SystemBus, adapter_path: Optional[str]):
         print("Existe dispositivo conectado — não alterando estado de pairing/discovery.")
         return
     try:
-        # Mesma correção: obter o proxy do BlueZ e acessar a interface Properties
         props = bus.get(BLUEZ_SERVICE, adapter_path)[PROPERTIES_IFACE]
-        # tornar pareable e discoverable indefinidamente
-        props.Set(ADAPTER_IFACE, 'Pairable', True)
-        props.Set(ADAPTER_IFACE, 'Discoverable', True)
-        props.Set(ADAPTER_IFACE, 'DiscoverableTimeout', 0)
+        props.Set(ADAPTER_IFACE, 'Pairable', GLib.Variant('b', True))
+        props.Set(ADAPTER_IFACE, 'Discoverable', GLib.Variant('b', True))
+        props.Set(ADAPTER_IFACE, 'DiscoverableTimeout', GLib.Variant('u', 0))
         print("Adaptador configurado para Pairable/Discoverable (timeout=0).")
     except Exception as e:
         print(f"Falha ao configurar discoverable/pairable: {e}")
 
+
 def main(argv=None):
     bus = SystemBus()
-    # Ao iniciar: renomear adaptador para "Pi Zero 2W", verificar dispositivos conectados
     adapter_path = get_first_adapter_path(bus)
     if adapter_path:
         set_adapter_alias(bus, adapter_path, "Pi Zero 2W")
         ensure_pairable_discoverable(bus, adapter_path)
     else:
         print("Nenhum adaptador Bluetooth encontrado no sistema.")
-    # Registrar um Agent simples para aceitar pairing automaticamente
+
     agent_path = "/org/bluez/agent_simple"
     agent = Agent()
-    bus = SystemBus()
-    # Exporta o agente no barramento: registrar o objeto D-Bus no caminho
-    # Use register_object para expor o agente (publish exigiria um bus name válido)
-    registration = bus.register_object(agent_path, agent)
+
+    # Registrar o agente no bus (node_info = None)
+    registration = bus.register_object(agent_path, agent, None)
+
     try:
         mgr = bus.get(BLUEZ_SERVICE, "/org/bluez")
-        # AgentManager1 interface
         am = mgr.AgentManager1
         am.RegisterAgent(agent_path, "NoInputNoOutput")
         am.RequestDefaultAgent(agent_path)
