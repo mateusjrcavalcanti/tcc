@@ -376,26 +376,20 @@ class Advertisement(ServiceInterface):
         self.local_name = local_name
 
     @dbus_property()
-    def Type(self):
+    def Type(self) -> 's':  # type: ignore
         return self._type
 
     @dbus_property()
-    def ServiceUUIDs(self):
+    def ServiceUUIDs(self) -> 'as':  # type: ignore
         return self.service_uuids
 
     @dbus_property()
-    def LocalName(self):
+    def LocalName(self) -> 's':  # type: ignore
         return self.local_name or ''
 
     @method()
     def Release(self) -> None:
         print('Advertisement released by BlueZ')
-
-# Definir anotações de retorno dinamicamente (workaround para dbus-next que
-# exige a string do tipo D-Bus na annotation de retorno sem poluir o lint).
-Advertisement.Type.__annotations__ = {'return': 's'}
-Advertisement.ServiceUUIDs.__annotations__ = {'return': 'as'}
-Advertisement.LocalName.__annotations__ = {'return': 's'}
 
 
 async def register_advertisement(bus: MessageBus, adapter_path: str, service_uuids=None, local_name=None):
