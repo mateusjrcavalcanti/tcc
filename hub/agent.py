@@ -51,9 +51,9 @@ async def register_agent(bus: MessageBus, capability: str = 'KeyboardDisplay'):
     agent = Agent(path)
     bus.export(path, agent)
 
-    # Registrar agent no AgentManager1
-    introspect = await bus.introspect('org.bluez', '/')
-    manager_obj = bus.get_proxy_object('org.bluez', '/', introspect)
+    # Registrar agent no AgentManager1 (objeto está em /org/bluez)
+    introspect = await bus.introspect('org.bluez', '/org/bluez')
+    manager_obj = bus.get_proxy_object('org.bluez', '/org/bluez', introspect)
     try:
         agent_manager = manager_obj.get_interface('org.bluez.AgentManager1')
     except Exception as e:
@@ -82,8 +82,8 @@ async def unregister_agent(bus: MessageBus, agent):
     if agent is None:
         return
     try:
-        introspect = await bus.introspect('org.bluez', '/')
-        manager_obj = bus.get_proxy_object('org.bluez', '/', introspect)
+        introspect = await bus.introspect('org.bluez', '/org/bluez')
+        manager_obj = bus.get_proxy_object('org.bluez', '/org/bluez', introspect)
         agent_manager = manager_obj.get_interface('org.bluez.AgentManager1')
         try:
             await agent_manager.call_unregister_agent(agent.path)

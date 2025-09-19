@@ -50,6 +50,27 @@ async def print_bluetooth_status(bus):
         for obj_path, interfaces in objects.items():
             if 'org.bluez.Device1' in interfaces:
                 dev_props = interfaces['org.bluez.Device1']
+                # inicializar variáveis por dispositivo
+                name = None
+                address = None
+                # Extrair address e name/alias
+                if 'Address' in dev_props:
+                    try:
+                        address = dev_props['Address'].value
+                    except Exception:
+                        address = dev_props['Address']
+
+                if 'Name' in dev_props:
+                    try:
+                        name = dev_props['Name'].value
+                    except Exception:
+                        name = dev_props['Name']
+                elif 'Alias' in dev_props:
+                    try:
+                        name = dev_props['Alias'].value
+                    except Exception:
+                        name = dev_props['Alias']
+
                 # Some D-Bus Variant semantics: expect boolean under 'Connected'
                 connected = False
                 if 'Connected' in dev_props:
@@ -60,19 +81,9 @@ async def print_bluetooth_status(bus):
                         connected = bool(val)
                 if connected:
                     connected_count += 1
-                    name = None
-                    if 'Name' in dev_props:
-                        try:
-                            name = dev_props['Name'].value
-                        except Exception:
-                            name = dev_props['Name']
-                    elif 'Alias' in dev_props:
-                        try:
-                            name = dev_props['Alias'].value
-                        except Exception:
-                            name = dev_props['Alias']
-            if name:
-                connected_names.append(str(name))
+                    if name:
+                        connected_names.append(str(name) + f" ({address})" if address else str(name))
+
                 # contar se emparelhado
                 if 'Paired' in dev_props:
                     try:
@@ -93,7 +104,7 @@ async def print_bluetooth_status(bus):
                             except Exception:
                                 pname = dev_props['Alias']
                         if pname:
-                            paired_names.append(str(pname))
+                            paired_names.append(str(pname) + f" ({address})" if address else str(pname))
 
         return {
             'alias': alias.value if hasattr(alias, 'value') else alias,
@@ -375,15 +386,15 @@ class Advertisement(ServiceInterface):
         self.service_uuids = service_uuids or []
         self.local_name = local_name
 
-    @dbus_property()
+    @dbus_property(access=None)
     def Type(self) -> 's':  # type: ignore
         return self._type
 
-    @dbus_property()
+    @dbus_property(access=None)
     def ServiceUUIDs(self) -> 'as':  # type: ignore
         return self.service_uuids
 
-    @dbus_property()
+    @dbus_property(access=None)
     def LocalName(self) -> 's':  # type: ignore
         return self.local_name or ''
 
