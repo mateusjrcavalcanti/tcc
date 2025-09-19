@@ -435,25 +435,31 @@ async def register_advertisement(bus: MessageBus, adapter_path: str, service_uui
         # Montar options vazias
         options = {}
 
-        # Registrar
+        # Registrar (tentar com opções mínimas, e em caso de falha tentar incluir Type)
+        print('Attempting register_advertisement with options:', options)
         try:
             await adv_manager.call_register_advertisement(advertisement.path, options)
-            print(f'Registered LE Advertisement at {advertisement.path}')
+            print(f'Registered LE Advertisement at {advertisement.path} (no options)')
             return advertisement, adv_manager
-        except Exception as e:
-            # imprimir introspeção curta e traceback para entender o motivo
-            try:
-                print('Adapter interfaces:', [iface.name for iface in introspect.interfaces])
-            except Exception:
-                pass
+        except Exception:
             import traceback
-            print('Failed to register advertisement, exception:')
+            print('Initial register_advertisement failed, trying with explicit Type option...')
             traceback.print_exc()
+            # Tentar novamente passando a opção Type (algumas versões do BlueZ esperam isso)
             try:
-                bus.unexport(advertisement.path)
+                options2 = {'Type': 'peripheral'}
+                print('Attempting register_advertisement with options:', options2)
+                await adv_manager.call_register_advertisement(advertisement.path, options2)
+                print(f'Registered LE Advertisement at {advertisement.path} (with Type option)')
+                return advertisement, adv_manager
             except Exception:
-                pass
-            return None, None
+                print('Second attempt failed; dumping traceback:')
+                traceback.print_exc()
+                try:
+                    bus.unexport(advertisement.path)
+                except Exception:
+                    pass
+                return None, None
         return advertisement, adv_manager
 
     except Exception:
