@@ -432,35 +432,35 @@ async def register_advertisement(bus: MessageBus, adapter_path: str, service_uui
 
         adv_manager = adapter_obj.get_interface('org.bluez.LEAdvertisingManager1')
 
-        # Montar options vazias
+        # Montar options usando Variant para satisfazer assinatura a{sv}
         options = {}
+        try:
+            # sempre enviar Type como Variant('s', 'peripheral') — BlueZ costuma aceitar
+            options['Type'] = Variant('s', 'peripheral')
+            # incluir ServiceUUIDs se fornecido
+            if service_uuids:
+                # service_uuids deve ser lista de strings
+                options['ServiceUUIDs'] = Variant('as', list(service_uuids))
+            if local_name:
+                options['LocalName'] = Variant('s', str(local_name))
+        except Exception:
+            # se algo falhar ao montar options, manter vazio (não usar strings planas)
+            options = {}
 
-        # Registrar (tentar com opções mínimas, e em caso de falha tentar incluir Type)
-        print('Attempting register_advertisement with options:', options)
+        print('Attempting register_advertisement with options (variants):', options)
         try:
             await adv_manager.call_register_advertisement(advertisement.path, options)
-            print(f'Registered LE Advertisement at {advertisement.path} (no options)')
+            print(f'Registered LE Advertisement at {advertisement.path} (with variant options)')
             return advertisement, adv_manager
         except Exception:
             import traceback
-            print('Initial register_advertisement failed, trying with explicit Type option...')
+            print('Register advertisement failed (with variant options); dumping traceback:')
             traceback.print_exc()
-            # Tentar novamente passando a opção Type (algumas versões do BlueZ esperam isso)
             try:
-                options2 = {'Type': 'peripheral'}
-                print('Attempting register_advertisement with options:', options2)
-                await adv_manager.call_register_advertisement(advertisement.path, options2)
-                print(f'Registered LE Advertisement at {advertisement.path} (with Type option)')
-                return advertisement, adv_manager
+                bus.unexport(advertisement.path)
             except Exception:
-                print('Second attempt failed; dumping traceback:')
-                traceback.print_exc()
-                try:
-                    bus.unexport(advertisement.path)
-                except Exception:
-                    pass
-                return None, None
-        return advertisement, adv_manager
+                pass
+            return None, None
 
     except Exception:
         import traceback
