@@ -1,174 +1,135 @@
-import asyncio
-from dbus_next.aio import MessageBus
-from dbus_next import Variant
-from dbus_next.service import ServiceInterface, method, signal
-from dbus_next.constants import BusType
+#!/usr/bin/env python3
+import dbus
+import dbus.exceptions
+import dbus.mainloop.glib
+import dbus.service
+from gi.repository import GLib
 
 BLUEZ_SERVICE_NAME = 'org.bluez'
-ADAPTER_PATH = '/org/bluez/hci0'
+ADAPTER_IFACE = 'org.bluez.Adapter1'
+GATT_MANAGER_IFACE = 'org.bluez.GattManager1'
+LE_ADVERTISING_MANAGER_IFACE = 'org.bluez.LEAdvertisingManager1'
+
 DEVICE_NAME = 'PythonBLE-Notifier'
 
+MAIN_LOOP = None
+
 # ---------------- Características ----------------
-class HelloWorldCharacteristic(ServiceInterface):
-    UUID = '12345678-1234-5678-1234-56789abcdef0'
-    def __init__(self, path):
-        super().__init__('com.example.HelloWorldCharacteristic')
+class Characteristic(dbus.service.Object):
+    def __init__(self, bus, path, uuid, flags, service):
         self.path = path
+        self.bus = bus
+        self.uuid = uuid
+        self.flags = flags
+        self.service = service
+        self.notifying = False
+        self.value = []
+        dbus.service.Object.__init__(self, bus, path)
 
-    @method()
-    def ReadValue(self) -> 'ay': # type: ignore
-        msg = "Hello World"
-        print("HelloWorld lido:", msg)
-        return [Variant('y', ord(c)) for c in msg]
+    @dbus.service.method('org.bluez.GattCharacteristic1', in_signature='', out_signature='ay')
+    def ReadValue(self):
+        print(f"{self.uuid} ReadValue")
+        return self.value
 
-class PingPongCharacteristic(ServiceInterface):
-    UUID = '12345678-1234-5678-1234-56789abcdef1'
-    def __init__(self, path):
-        super().__init__('com.example.PingPongCharacteristic')
-        self.path = path
+    @dbus.service.method('org.bluez.GattCharacteristic1', in_signature='ay', out_signature='')
+    def WriteValue(self, value):
+        print(f"{self.uuid} WriteValue: {bytes(value).decode()}")
+        self.value = value
+        if self.notifying:
+            self.PropertiesChanged({'Value': self.value})
 
-    @method()
-    def ReadValue(self) -> 'ay': # type: ignore
-        msg = "Pong"
-        print("PingPong lido:", msg)
-        return [Variant('y', ord(c)) for c in msg]
-
-class MessageCharacteristic(ServiceInterface):
-    UUID = 'abcdef01-1234-5678-1234-56789abcdef0'
-    def __init__(self, path):
-        super().__init__('com.example.MessageCharacteristic')
-        self.path = path
-        self.message = "Mensagem padrão"
-        self.subscribed = False
-
-    @method()
-    def ReadValue(self) -> 'ay': # type: ignore
-        return [Variant('y', ord(c)) for c in self.message]
-
-    @method()
-    def WriteValue(self, value: 'ay'): # type: ignore
-        self.message = "".join([chr(v.value) for v in value])
-        print("Mensagem atualizada para:", self.message)
-        if self.subscribed:
-            self.PropertiesChanged({'Value': [Variant('y', ord(c)) for c in self.message]})
-
-    @method()
+    @dbus.service.method('org.bluez.GattCharacteristic1')
     def StartNotify(self):
-        self.subscribed = True
-        print("Notificação iniciada para Message")
+        print(f"{self.uuid} StartNotify")
+        self.notifying = True
 
-    @method()
+    @dbus.service.method('org.bluez.GattCharacteristic1')
     def StopNotify(self):
-        self.subscribed = False
-        print("Notificação parada para Message")
+        print(f"{self.uuid} StopNotify")
+        self.notifying = False
 
-    @signal()
-    def PropertiesChanged(self, changed: 'a{sv}'): # type: ignore
+    @dbus.service.signal('org.freedesktop.DBus.Properties', signature='a{sv}')
+    def PropertiesChanged(self, changed):
         pass
 
 # ---------------- Serviços ----------------
-class ChecagemService(ServiceInterface):
-    UUID = '12345678-1234-5678-1234-56789abcdeff'
-    def __init__(self, path):
-        super().__init__('com.example.ChecagemService')
+class Service(dbus.service.Object):
+    def __init__(self, bus, path, uuid, primary=True):
         self.path = path
-        self.hello_char = HelloWorldCharacteristic(path + '/hello')
-        self.ping_char = PingPongCharacteristic(path + '/ping')
+        self.bus = bus
+        self.uuid = uuid
+        self.primary = primary
+        self.characteristics = []
+        dbus.service.Object.__init__(self, bus, path)
 
-class MensagemService(ServiceInterface):
-    UUID = 'abcdef01-1234-5678-1234-56789abcdef1'
-    def __init__(self, path):
-        super().__init__('com.example.MensagemService')
-        self.path = path
-        self.message_char = MessageCharacteristic(path + '/message')
+    def add_characteristic(self, characteristic):
+        self.characteristics.append(characteristic)
 
-# ---------------- Aplicação GATT ----------------
-class Application(ServiceInterface):
-    def __init__(self, path='/com/example/application'):
-        super().__init__('org.bluez.GattApplication1')
-        self.path = path
+# ---------------- Aplicação ----------------
+class Application(dbus.service.Object):
+    def __init__(self, bus):
+        self.path = '/'
         self.services = []
+        self.bus = bus
+        dbus.service.Object.__init__(self, bus, self.path)
 
     def add_service(self, service):
         self.services.append(service)
 
-    @method()
+    @dbus.service.method('org.freedesktop.DBus.ObjectManager', out_signature='a{oa{sa{sv}}}')
     def GetManagedObjects(self):
-        objects = {}
+        managed_objects = {}
         for service in self.services:
-            objects[service.path] = service.get_properties()
-            for char in [getattr(service, 'hello_char', None),
-                         getattr(service, 'ping_char', None),
-                         getattr(service, 'message_char', None)]:
-                if char:
-                    objects[char.path] = char.get_properties()
-        return objects
-
-# ---------------- Registro de serviços ----------------
-async def register_services(bus):
-    introspect = await bus.introspect(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
-    adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, ADAPTER_PATH, introspect)
-    gatt_manager = adapter_obj.get_interface('org.bluez.GattManager1')
-
-    app = Application()
-
-    checagem = ChecagemService(app.path + '/service_checagem')
-    mensagem = MensagemService(app.path + '/service_mensagem')
-
-    app.add_service(checagem)
-    app.add_service(mensagem)
-
-    # Exporta aplicação, serviços e características
-    bus.export(app.path, app)
-    bus.export(checagem.path, checagem)
-    bus.export(checagem.hello_char.path, checagem.hello_char)
-    bus.export(checagem.ping_char.path, checagem.ping_char)
-    bus.export(mensagem.path, mensagem)
-    bus.export(mensagem.message_char.path, mensagem.message_char)
-
-    await gatt_manager.call_register_application(app.path, {})
-    print("Serviços BLE registrados: Checagem e Mensagem (com notificação)")
-
-# ---------------- Advertising ----------------
-async def start_advertising(bus):
-    introspect = await bus.introspect(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
-    adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, ADAPTER_PATH, introspect)
-    ad_manager = adapter_obj.get_interface('org.bluez.LEAdvertisingManager1')
-
-    ad_path = '/com/example/advertisement0'
-    class Advertisement(ServiceInterface):
-        def __init__(self, path):
-            super().__init__('org.bluez.LEAdvertisement1')
-            self.path = path
-
-        @method()
-        def Release(self):
-            print("Advertising liberado")
-
-        @method()
-        def GetProperties(self):
-            return {
-                'Type': 'peripheral',
-                'LocalName': DEVICE_NAME,
-                'ServiceUUIDs': [
-                    ChecagemService.UUID,
-                    MensagemService.UUID
-                ]
+            managed_objects[service.path] = {
+                'org.bluez.GattService1': {
+                    'UUID': service.uuid,
+                    'Primary': service.primary
+                }
             }
-
-    advertisement = Advertisement(ad_path)
-    bus.export(ad_path, advertisement)
-    await ad_manager.call_register_advertisement(ad_path, {})
-    print(f"Advertising iniciado, dispositivo visível como '{DEVICE_NAME}'.")
+            for char in service.characteristics:
+                managed_objects[char.path] = {
+                    'org.bluez.GattCharacteristic1': {
+                        'UUID': char.uuid,
+                        'Flags': char.flags
+                    }
+                }
+        return managed_objects
 
 # ---------------- Main ----------------
-async def main():
-    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-    await register_services(bus)
-    await start_advertising(bus)
-    print("Aguardando conexões BLE... Pressione Ctrl+C para sair.")
-    while True:
-        await asyncio.sleep(1)
+def main():
+    global MAIN_LOOP
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    app = Application(bus)
+
+    # Serviço Checagem
+    checagem = Service(bus, '/com/example/service_checagem', '12345678-1234-5678-1234-56789abcdeff')
+    hello_char = Characteristic(bus, checagem.path + '/hello', '12345678-1234-5678-1234-56789abcdef0', ['read'], checagem)
+    hello_char.value = [dbus.Byte(ord(c)) for c in "Hello World"]
+    ping_char = Characteristic(bus, checagem.path + '/ping', '12345678-1234-5678-1234-56789abcdef1', ['read'], checagem)
+    ping_char.value = [dbus.Byte(ord(c)) for c in "Pong"]
+    checagem.add_characteristic(hello_char)
+    checagem.add_characteristic(ping_char)
+    app.add_service(checagem)
+
+    # Serviço Mensagem
+    mensagem = Service(bus, '/com/example/service_mensagem', 'abcdef01-1234-5678-1234-56789abcdef1')
+    message_char = Characteristic(bus, mensagem.path + '/message', 'abcdef01-1234-5678-1234-56789abcdef0', ['read', 'write', 'notify'], mensagem)
+    message_char.value = [dbus.Byte(ord(c)) for c in "Mensagem padrão"]
+    mensagem.add_characteristic(message_char)
+    app.add_service(mensagem)
+
+    # Registrar GATT
+    adapter_path = '/org/bluez/hci0'
+    adapter_obj = bus.get_object(BLUEZ_SERVICE_NAME, adapter_path)
+    gatt_manager = dbus.Interface(adapter_obj, GATT_MANAGER_IFACE)
+    gatt_manager.RegisterApplication(app.path, {}, reply_handler=lambda: print("GATT Application registrada!"),
+                                     error_handler=lambda e: print("Erro:", e))
+
+    MAIN_LOOP = GLib.MainLoop()
+    print("Servidor BLE rodando...")
+    MAIN_LOOP.run()
+
+if __name__ == '__main__':
+    main()
