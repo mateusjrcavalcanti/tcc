@@ -1,104 +1,150 @@
-import os
-import argparse
 import asyncio
 from dbus_next.aio import MessageBus
-from dbus_next import Variant, BusType
-from gatt_server import register_gatt_application
-from constants import SHARED_DIR, ADAPTER_PATH, DEVICE_NAME
-from bluetooth import setup_advertising, print_bluetooth_status, print_status_summary, unpair_all_devices, monitor_events, register_advertisement, unregister_advertisement, start_event_listeners
-from agent import register_agent, unregister_agent
+from dbus_next import Variant
+from dbus_next.service import ServiceInterface, method, signal
+from dbus_next.constants import BusType
 
+BLUEZ_SERVICE_NAME = 'org.bluez'
+ADAPTER_PATH = '/org/bluez/hci0'
+DEVICE_NAME = 'PythonBLE-Notifier'
 
-async def main(poll: int | None = None):
+# --- Características do serviço Checagem ---
+class HelloWorldCharacteristic(ServiceInterface):
+    UUID = '12345678-1234-5678-1234-56789abcdef0'
+    def __init__(self, path):
+        super().__init__('com.example.HelloWorldCharacteristic')
+        self.path = path
+
+    @method()
+    def ReadValue(self) -> list:
+        msg = "Hello World"
+        print("HelloWorld lido:", msg)
+        return [Variant('y', ord(c)) for c in msg]
+
+class PingPongCharacteristic(ServiceInterface):
+    UUID = '12345678-1234-5678-1234-56789abcdef1'
+    def __init__(self, path):
+        super().__init__('com.example.PingPongCharacteristic')
+        self.path = path
+
+    @method()
+    def ReadValue(self) -> list:
+        msg = "Pong"
+        print("PingPong lido:", msg)
+        return [Variant('y', ord(c)) for c in msg]
+
+class ChecagemService(ServiceInterface):
+    UUID = '12345678-1234-5678-1234-56789abcdeff'
+    def __init__(self, path):
+        super().__init__('com.example.ChecagemService')
+        self.path = path
+        self.hello_char = HelloWorldCharacteristic(path + '/hello')
+        self.ping_char = PingPongCharacteristic(path + '/ping')
+
+# --- Serviço Mensagem com notificação ---
+class MessageCharacteristic(ServiceInterface):
+    UUID = 'abcdef01-1234-5678-1234-56789abcdef0'
+    def __init__(self, path):
+        super().__init__('com.example.MessageCharacteristic')
+        self.path = path
+        self.message = "Mensagem padrão"
+        self.subscribed = False
+
+    @method()
+    def ReadValue(self) -> list:
+        print("Mensagem atual lida:", self.message)
+        return [Variant('y', ord(c)) for c in self.message]
+
+    @method()
+    def WriteValue(self, value: list):
+        self.message = "".join([chr(v.value) for v in value])
+        print("Mensagem atualizada para:", self.message)
+        if self.subscribed:
+            self.PropertiesChanged({'Value': [Variant('y', ord(c)) for c in self.message]})
+
+    @method()
+    def StartNotify(self):
+        self.subscribed = True
+        print("Notificação iniciada para a característica Message")
+
+    @method()
+    def StopNotify(self):
+        self.subscribed = False
+        print("Notificação parada para a característica Message")
+
+    @signal()
+    def PropertiesChanged(self, changed: dict):
+        """Sinal enviado quando a mensagem muda"""
+        pass
+
+class MensagemService(ServiceInterface):
+    UUID = 'abcdef01-1234-5678-1234-56789abcdef1'
+    def __init__(self, path):
+        super().__init__('com.example.MensagemService')
+        self.path = path
+        self.message_char = MessageCharacteristic(path + '/message')
+
+# --- Registro de serviços ---
+async def register_services(bus):
+    introspect = await bus.introspect(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
+    adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, ADAPTER_PATH, introspect)
+    gatt_manager = adapter_obj.get_interface('org.bluez.GattManager1')
+
+    # Checagem
+    checagem = ChecagemService('/com/example/service_checagem')
+    bus.export(checagem.path, checagem)
+    bus.export(checagem.hello_char.path, checagem.hello_char)
+    bus.export(checagem.ping_char.path, checagem.ping_char)
+    await gatt_manager.call_register_application('/com/example/service_checagem', {})
+
+    # Mensagem
+    mensagem = MensagemService('/com/example/service_mensagem')
+    bus.export(mensagem.path, mensagem)
+    bus.export(mensagem.message_char.path, mensagem.message_char)
+    await gatt_manager.call_register_application('/com/example/service_mensagem', {})
+
+    print("Serviços BLE registrados: Checagem e Mensagem (com notificação)")
+
+# --- Advertising ---
+async def start_advertising(bus):
+    introspect = await bus.introspect(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
+    adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, ADAPTER_PATH, introspect)
+    ad_manager = adapter_obj.get_interface('org.bluez.LEAdvertisingManager1')
+
+    ad_path = '/com/example/advertisement0'
+    class Advertisement(ServiceInterface):
+        def __init__(self, path):
+            super().__init__('org.bluez.LEAdvertisement1')
+            self.path = path
+
+        @method()
+        def Release(self):
+            print("Advertising liberado")
+
+        @method()
+        def GetProperties(self):
+            return {
+                'Type': 'peripheral',
+                'LocalName': DEVICE_NAME,
+                'ServiceUUIDs': [
+                    ChecagemService.UUID,
+                    MensagemService.UUID
+                ]
+            }
+
+    advertisement = Advertisement(ad_path)
+    bus.export(ad_path, advertisement)
+    await ad_manager.call_register_advertisement(ad_path, {})
+    print(f"Advertising iniciado, dispositivo visível como '{DEVICE_NAME}'.")
+
+# --- Main ---
+async def main():
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-
-    # Configurar adaptador Bluetooth
-    introspect = await bus.introspect('org.bluez', ADAPTER_PATH)
-    adapter = bus.get_proxy_object('org.bluez', ADAPTER_PATH, introspect)
-    props_iface = adapter.get_interface('org.freedesktop.DBus.Properties')
-
-    # Renomear adaptador e ligar
-    await props_iface.call_set('org.bluez.Adapter1', 'Alias', Variant('s', DEVICE_NAME))
-    await props_iface.call_set('org.bluez.Adapter1', 'Powered', Variant('b', True))
-
-    # Desparear todos os dispositivos na inicialização (limpeza)
-    await unpair_all_devices(bus)
-
-    # Registrar aplicação GATT
-    registration_result = await register_gatt_application(bus)
-    # registration_result é (True, [uuids]) ou (False, [])
-    if isinstance(registration_result, tuple):
-        registration_success, service_uuids = registration_result
-    else:
-        registration_success = bool(registration_result)
-        service_uuids = []
-
-    # Registrar agent do BlueZ (auto-confirm)
-    agent = await register_agent(bus, capability='KeyboardDisplay')
-
-    # Registrar advertising LE explicitamente, se possível
-    advertisement = None
-    adv_manager = None
-    if registration_success:
-        # registrar objeto advertisement (usamos o service UUID do FileService se disponível)
-        advertisement, adv_manager = await register_advertisement(bus, ADAPTER_PATH, service_uuids=service_uuids, local_name=DEVICE_NAME)
-        if advertisement is None:
-            # fallback para ajustar propriedades do adaptador
-            await setup_advertising(bus)
-    else:
-        print("GATT registration failed, continuing without advertising")
-
-    print("Servidor GATT BLE pronto! Conecte pelo seu celular ou app BLE.")
-
-    # Iniciar listeners D-Bus para eventos (mais eficiente que polling)
-    listeners_task = asyncio.create_task(start_event_listeners(bus))
-
-    # Obter status do adaptador Bluetooth e imprimir resumo consolidado (evita logs duplicados)
-    try:
-        if poll is None:
-            status = await print_bluetooth_status(bus)
-            print_status_summary(status, DEVICE_NAME, SHARED_DIR)
-
-            # Manter o programa rodando
-            await asyncio.Future()
-        else:
-            # Atualização periódica: limpar terminal e reimprimir o resumo a cada <poll> segundos
-            while True:
-                status = await print_bluetooth_status(bus)
-                # limpar tela
-                os.system('clear')
-                print("Servidor GATT BLE pronto! Conecte pelo seu celular ou app BLE.")
-                print_status_summary(status, DEVICE_NAME, SHARED_DIR)
-                await asyncio.sleep(poll)
-    finally:
-        # desregistrar advertisement se foi registrado
-        try:
-            if advertisement is not None and adv_manager is not None:
-                await unregister_advertisement(bus, advertisement, adv_manager)
-        except Exception as e:
-            print(f"Erro ao desregistrar advertisement no final: {e}")
-
-        # desregistrar agent
-        try:
-            await unregister_agent(bus, agent)
-        except Exception as e:
-            print(f"Erro ao desregistrar agent no final: {e}")
-
-        listeners_task.cancel()
-        try:
-            await listeners_task
-        except asyncio.CancelledError:
-            pass
-
+    await register_services(bus)
+    await start_advertising(bus)
+    print("Aguardando conexões BLE... Pressione Ctrl+C para sair.")
+    while True:
+        await asyncio.sleep(1)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='GATT BLE server status')
-    parser.add_argument('--poll', type=int, default=None, help='Atualiza o status a cada N segundos (se omitido, mostra apenas uma vez)')
-    args = parser.parse_args()
-
-    try:
-        asyncio.run(main(poll=args.poll))
-    except KeyboardInterrupt:
-        print("Servidor encerrado pelo usuário")
-    except Exception as e:
-        print(f"Erro inesperado: {e}")
+    asyncio.run(main())
