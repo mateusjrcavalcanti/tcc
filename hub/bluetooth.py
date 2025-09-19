@@ -432,35 +432,34 @@ async def register_advertisement(bus: MessageBus, adapter_path: str, service_uui
 
         adv_manager = adapter_obj.get_interface('org.bluez.LEAdvertisingManager1')
 
-        # Montar options usando Variant para satisfazer assinatura a{sv}
-        options = {}
-        try:
-            # sempre enviar Type como Variant('s', 'peripheral') — BlueZ costuma aceitar
-            options['Type'] = Variant('s', 'peripheral')
-            # incluir ServiceUUIDs se fornecido
-            if service_uuids:
-                # service_uuids deve ser lista de strings
-                options['ServiceUUIDs'] = Variant('as', list(service_uuids))
-            if local_name:
-                options['LocalName'] = Variant('s', str(local_name))
-        except Exception:
-            # se algo falhar ao montar options, manter vazio (não usar strings planas)
-            options = {}
+        # Tentar registrar em etapas para isolar qual opção causa a recusa no BlueZ
+        attempts = []
+        # 1) apenas Type
+        attempts.append({'Type': Variant('s', 'peripheral')})
+        # 2) Type + ServiceUUIDs (se fornecido)
+        if service_uuids:
+            attempts.append({'Type': Variant('s', 'peripheral'), 'ServiceUUIDs': Variant('as', list(service_uuids))})
+        # 3) Type + ServiceUUIDs + LocalName (se local_name fornecido)
+        if service_uuids and local_name:
+            attempts.append({'Type': Variant('s', 'peripheral'), 'ServiceUUIDs': Variant('as', list(service_uuids)), 'LocalName': Variant('s', str(local_name))})
 
-        print('Attempting register_advertisement with options (variants):', options)
-        try:
-            await adv_manager.call_register_advertisement(advertisement.path, options)
-            print(f'Registered LE Advertisement at {advertisement.path} (with variant options)')
-            return advertisement, adv_manager
-        except Exception:
-            import traceback
-            print('Register advertisement failed (with variant options); dumping traceback:')
-            traceback.print_exc()
+        for idx, opts in enumerate(attempts, start=1):
             try:
-                bus.unexport(advertisement.path)
+                print(f'Attempt #{idx} to register advertisement with options: {opts}')
+                await adv_manager.call_register_advertisement(advertisement.path, opts)
+                print(f'Registered LE Advertisement at {advertisement.path} (attempt #{idx})')
+                return advertisement, adv_manager
             except Exception:
-                pass
-            return None, None
+                import traceback
+                print(f'Attempt #{idx} failed; traceback:')
+                traceback.print_exc()
+
+        # se todas as tentativas falharem, limpar export e retornar None
+        try:
+            bus.unexport(advertisement.path)
+        except Exception:
+            pass
+        return None, None
 
     except Exception:
         import traceback
