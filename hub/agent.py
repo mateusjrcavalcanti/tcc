@@ -9,40 +9,40 @@ class Agent(ServiceInterface):
         self.path = path
 
     @method()
-    def Release(self):
+    def Release(self) -> None:
         print('Agent released')
 
     @method()
-    def RequestPinCode(self, device) -> 's':  # type: ignore
+    def RequestPinCode(self, device: 'o') -> 's':  # type: ignore
         print(f'RequestPinCode for {device}, returning default PIN 0000')
         return '0000'
 
     @method()
-    def DisplayPinCode(self, device, pincode):
+    def DisplayPinCode(self, device: 'o', pincode: 's'):  # type: ignore
         print(f'DisplayPinCode {pincode} for {device}')
 
     @method()
-    def RequestPasskey(self, device) -> 'u':  # type: ignore
+    def RequestPasskey(self, device: 'o') -> 'u':  # type: ignore
         print(f'RequestPasskey for {device}, returning 000000')
         return 0
 
     @method()
-    def DisplayPasskey(self, device, passkey, entered):
+    def DisplayPasskey(self, device: 'o', passkey: 'u', entered: 'u'):  # type: ignore
         print(f'DisplayPasskey {passkey} (entered={entered}) for {device}')
 
     @method()
-    def RequestConfirmation(self, device, passkey):
+    def RequestConfirmation(self, device: 'o', passkey: 'u'):  # type: ignore
         print(f'RequestConfirmation {passkey} for {device} - auto-confirming')
         # Auto-confirm: apenas retorna sem erro
         return
 
     @method()
-    def AuthorizeService(self, device, uuid):
+    def AuthorizeService(self, device: 'o', uuid: 's'):  # type: ignore
         print(f'AuthorizeService {uuid} @ {device} - auto-authorized')
         return
 
     @method()
-    def Cancel(self):
+    def Cancel(self) -> None:
         print('Agent canceled')
 
 
