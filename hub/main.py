@@ -8,7 +8,7 @@ BLUEZ_SERVICE_NAME = 'org.bluez'
 ADAPTER_PATH = '/org/bluez/hci0'
 DEVICE_NAME = 'PythonBLE-Notifier'
 
-# --- Características do serviço Checagem ---
+# ---------------- Características ----------------
 class HelloWorldCharacteristic(ServiceInterface):
     UUID = '12345678-1234-5678-1234-56789abcdef0'
     def __init__(self, path):
@@ -16,7 +16,7 @@ class HelloWorldCharacteristic(ServiceInterface):
         self.path = path
 
     @method()
-    def ReadValue(self) -> 'ay':
+    def ReadValue(self) -> 'ay': # type: ignore
         msg = "Hello World"
         print("HelloWorld lido:", msg)
         return [Variant('y', ord(c)) for c in msg]
@@ -28,20 +28,11 @@ class PingPongCharacteristic(ServiceInterface):
         self.path = path
 
     @method()
-    def ReadValue(self) -> 'ay':
+    def ReadValue(self) -> 'ay': # type: ignore
         msg = "Pong"
         print("PingPong lido:", msg)
         return [Variant('y', ord(c)) for c in msg]
 
-class ChecagemService(ServiceInterface):
-    UUID = '12345678-1234-5678-1234-56789abcdeff'
-    def __init__(self, path):
-        super().__init__('com.example.ChecagemService')
-        self.path = path
-        self.hello_char = HelloWorldCharacteristic(path + '/hello')
-        self.ping_char = PingPongCharacteristic(path + '/ping')
-
-# --- Serviço Mensagem com notificação ---
 class MessageCharacteristic(ServiceInterface):
     UUID = 'abcdef01-1234-5678-1234-56789abcdef0'
     def __init__(self, path):
@@ -51,11 +42,11 @@ class MessageCharacteristic(ServiceInterface):
         self.subscribed = False
 
     @method()
-    def ReadValue(self) -> 'ay':
+    def ReadValue(self) -> 'ay': # type: ignore
         return [Variant('y', ord(c)) for c in self.message]
 
     @method()
-    def WriteValue(self, value: 'ay'):
+    def WriteValue(self, value: 'ay'): # type: ignore
         self.message = "".join([chr(v.value) for v in value])
         print("Mensagem atualizada para:", self.message)
         if self.subscribed:
@@ -64,17 +55,25 @@ class MessageCharacteristic(ServiceInterface):
     @method()
     def StartNotify(self):
         self.subscribed = True
-        print("Notificação iniciada para a característica Message")
+        print("Notificação iniciada para Message")
 
     @method()
     def StopNotify(self):
         self.subscribed = False
-        print("Notificação parada para a característica Message")
+        print("Notificação parada para Message")
 
     @signal()
     def PropertiesChanged(self, changed: 'a{sv}'): # type: ignore
-        """Sinal enviado quando a mensagem muda"""
         pass
+
+# ---------------- Serviços ----------------
+class ChecagemService(ServiceInterface):
+    UUID = '12345678-1234-5678-1234-56789abcdeff'
+    def __init__(self, path):
+        super().__init__('com.example.ChecagemService')
+        self.path = path
+        self.hello_char = HelloWorldCharacteristic(path + '/hello')
+        self.ping_char = PingPongCharacteristic(path + '/ping')
 
 class MensagemService(ServiceInterface):
     UUID = 'abcdef01-1234-5678-1234-56789abcdef1'
@@ -83,28 +82,54 @@ class MensagemService(ServiceInterface):
         self.path = path
         self.message_char = MessageCharacteristic(path + '/message')
 
-# --- Registro de serviços ---
+# ---------------- Aplicação GATT ----------------
+class Application(ServiceInterface):
+    def __init__(self, path='/com/example/application'):
+        super().__init__('org.bluez.GattApplication1')
+        self.path = path
+        self.services = []
+
+    def add_service(self, service):
+        self.services.append(service)
+
+    @method()
+    def GetManagedObjects(self):
+        objects = {}
+        for service in self.services:
+            objects[service.path] = service.get_properties()
+            for char in [getattr(service, 'hello_char', None),
+                         getattr(service, 'ping_char', None),
+                         getattr(service, 'message_char', None)]:
+                if char:
+                    objects[char.path] = char.get_properties()
+        return objects
+
+# ---------------- Registro de serviços ----------------
 async def register_services(bus):
     introspect = await bus.introspect(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
     adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, ADAPTER_PATH, introspect)
     gatt_manager = adapter_obj.get_interface('org.bluez.GattManager1')
 
-    # Checagem
-    checagem = ChecagemService('/com/example/service_checagem')
+    app = Application()
+
+    checagem = ChecagemService(app.path + '/service_checagem')
+    mensagem = MensagemService(app.path + '/service_mensagem')
+
+    app.add_service(checagem)
+    app.add_service(mensagem)
+
+    # Exporta aplicação, serviços e características
+    bus.export(app.path, app)
     bus.export(checagem.path, checagem)
     bus.export(checagem.hello_char.path, checagem.hello_char)
     bus.export(checagem.ping_char.path, checagem.ping_char)
-    await gatt_manager.call_register_application('/com/example/service_checagem', {})
-
-    # Mensagem
-    mensagem = MensagemService('/com/example/service_mensagem')
     bus.export(mensagem.path, mensagem)
     bus.export(mensagem.message_char.path, mensagem.message_char)
-    await gatt_manager.call_register_application('/com/example/service_mensagem', {})
 
+    await gatt_manager.call_register_application(app.path, {})
     print("Serviços BLE registrados: Checagem e Mensagem (com notificação)")
 
-# --- Advertising ---
+# ---------------- Advertising ----------------
 async def start_advertising(bus):
     introspect = await bus.introspect(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
     adapter_obj = bus.get_proxy_object(BLUEZ_SERVICE_NAME, ADAPTER_PATH, introspect)
@@ -136,7 +161,7 @@ async def start_advertising(bus):
     await ad_manager.call_register_advertisement(ad_path, {})
     print(f"Advertising iniciado, dispositivo visível como '{DEVICE_NAME}'.")
 
-# --- Main ---
+# ---------------- Main ----------------
 async def main():
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
     await register_services(bus)
