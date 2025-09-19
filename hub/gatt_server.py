@@ -47,7 +47,17 @@ async def register_gatt_application(bus):
     try:
         await gatt_manager.call_register_application(APP_PATH, options)
         print("GATT application registered successfully")
-        return True
+        # Retornar também os UUIDs dos serviços para uso em advertisement
+        service_uuids = []
+        try:
+            service_uuids.append(str(service.UUID))
+        except Exception:
+            pass
+        try:
+            service_uuids.append(str(wifi_service.UUID))
+        except Exception:
+            pass
+        return True, service_uuids
     except Exception as e:
         print(f"Failed to register GATT application: {e}")
-        return False
+        return False, []

@@ -3,6 +3,9 @@ import asyncio
 from dbus_next.aio import MessageBus
 from dbus_next import Variant
 from dbus_next import BusType
+from dbus_next.service import (ServiceInterface, method, dbus_property)
+from dbus_next.aio import MessageBus
+import uuid
 from constants import SHARED_DIR, ADAPTER_PATH, DEVICE_NAME
 
 
@@ -209,3 +212,237 @@ async def monitor_events(bus, interval: float = 1.0):
             print(f"Erro no monitor de eventos Bluetooth: {e}")
 
         await asyncio.sleep(interval)
+
+
+async def start_event_listeners(bus):
+    """Instala listeners D-Bus para eventos de Bluetooth (InterfacesAdded, InterfacesRemoved e PropertiesChanged).
+
+    Esta função registra callbacks que imprimem eventos no terminal quando dispositivos se conectam,
+    desconectam, pareiam ou despareiam. Usa org.freedesktop.DBus.ObjectManager para descobrir objetos
+    existentes e conectar handlers PropertiesChanged para cada Device1.
+    """
+    obj = bus.get_proxy_object('org.bluez', '/', await bus.introspect('org.bluez', '/'))
+    manager = obj.get_interface('org.freedesktop.DBus.ObjectManager')
+
+    # estado local dos dispositivos por path -> {'connected': bool, 'paired': bool, 'name': str}
+    device_state = {}
+
+    # Helper para extrair campo string de um possible Variant
+    def _get_str(v):
+        try:
+            return v.value
+        except Exception:
+            return v
+
+    # Handler assíncrono para quando novas interfaces são adicionadas
+    def on_interfaces_added(path, interfaces):
+        # schedule async task to handle introspection
+        asyncio.create_task(_handle_interfaces_added(path, interfaces))
+
+    async def _handle_interfaces_added(path, interfaces):
+        if 'org.bluez.Device1' not in interfaces:
+            return
+
+        props = interfaces['org.bluez.Device1']
+        name = None
+        if 'Name' in props:
+            name = _get_str(props['Name'])
+        elif 'Alias' in props:
+            name = _get_str(props['Alias'])
+        address = None
+        if 'Address' in props:
+            address = _get_str(props['Address'])
+
+        connected = False
+        if 'Connected' in props:
+            try:
+                connected = bool(props['Connected'].value)
+            except Exception:
+                connected = bool(props['Connected'])
+
+        paired = False
+        if 'Paired' in props:
+            try:
+                paired = bool(props['Paired'].value)
+            except Exception:
+                paired = bool(props['Paired'])
+
+        display_name = name or address or path
+        # imprimir eventos iniciais se necessário
+        if connected:
+            print(f"[evento] Dispositivo conectado: {display_name}")
+        if paired:
+            print(f"[evento] Dispositivo pareado: {display_name}")
+
+        # Exportar proxy do dispositivo e ligar PropertiesChanged
+        try:
+            introspect = await bus.introspect('org.bluez', path)
+            dev_obj = bus.get_proxy_object('org.bluez', path, introspect)
+            props_iface = dev_obj.get_interface('org.freedesktop.DBus.Properties')
+
+            def on_properties_changed(interface, changed, invalidated):
+                # interface é a interface cujo properties mudaram
+                if interface != 'org.bluez.Device1':
+                    return
+
+                # Extrair Nome
+                n = None
+                if 'Name' in changed:
+                    try:
+                        n = changed['Name'].value
+                    except Exception:
+                        n = changed['Name']
+
+                # Conexão
+                if 'Connected' in changed:
+                    try:
+                        new_connected = bool(changed['Connected'].value)
+                    except Exception:
+                        new_connected = bool(changed['Connected'])
+                    prev = device_state.get(path, {}).get('connected')
+                    if prev is None:
+                        # primeiro estado observado
+                        pass
+                    elif new_connected and not prev:
+                        print(f"[evento] Dispositivo conectado: {n or display_name}")
+                    elif not new_connected and prev:
+                        print(f"[evento] Dispositivo desconectado: {n or display_name}")
+                    device_state.setdefault(path, {})['connected'] = new_connected
+
+                # Pareado
+                if 'Paired' in changed:
+                    try:
+                        new_paired = bool(changed['Paired'].value)
+                    except Exception:
+                        new_paired = bool(changed['Paired'])
+                    prevp = device_state.get(path, {}).get('paired')
+                    if prevp is None:
+                        pass
+                    elif new_paired and not prevp:
+                        print(f"[evento] Dispositivo pareado: {n or display_name}")
+                    elif not new_paired and prevp:
+                        print(f"[evento] Dispositivo despareado: {n or display_name}")
+                    device_state.setdefault(path, {})['paired'] = new_paired
+
+            props_iface.on_properties_changed(on_properties_changed)
+
+            # inicializar estado
+            device_state.setdefault(path, {})['connected'] = connected
+            device_state.setdefault(path, {})['paired'] = paired
+
+        except Exception as e:
+            print(f"Erro ao iniciar listener para {path}: {e}")
+
+    # InterfacesRemoved handler
+    def on_interfaces_removed(path, interfaces):
+        if 'org.bluez.Device1' in interfaces:
+            # dispositivo removido - pode ser despareado
+            prev = device_state.pop(path, None)
+            name = path
+            if prev and prev.get('paired'):
+                print(f"[evento] Dispositivo despareado (removido): {name}")
+
+    # Registra handlers
+    manager.on_interfaces_added(on_interfaces_added)
+    manager.on_interfaces_removed(on_interfaces_removed)
+
+    # Conectar handlers para dispositivos já existentes
+    try:
+        objects = await manager.call_get_managed_objects()
+        for obj_path, interfaces in objects.items():
+            if 'org.bluez.Device1' in interfaces:
+                # chamar handler para inicializar e conectar properties
+                await _handle_interfaces_added(obj_path, interfaces)
+    except Exception as e:
+        print(f"Erro ao inicializar listeners de dispositivos existentes: {e}")
+
+    print('Event listeners D-Bus instalados (InterfacesAdded/Removed + PropertiesChanged)')
+
+
+
+class Advertisement(ServiceInterface):
+    """Implementation minimalista de org.bluez.LEAdvertisement1 para registro do advertisement.
+
+    Note: BlueZ espera um objeto exportado no DBus que implemente
+    org.bluez.LEAdvertisement1 com os métodos Release e a propriedade Type.
+    Esta classe exporta o necessário.
+    """
+
+    def __init__(self, path: str, adv_type: str = 'peripheral', service_uuids=None, local_name=None):
+        super().__init__('org.bluez.LEAdvertisement1')
+        self.path = path
+        self._type = adv_type
+        self.service_uuids = service_uuids or []
+        self.local_name = local_name
+
+    @dbus_property(signature='s')
+    def Type(self):
+        return self._type
+
+    @dbus_property(signature='as')
+    def ServiceUUIDs(self):
+        return self.service_uuids
+
+    @dbus_property(signature='s')
+    def LocalName(self):
+        return self.local_name or ''
+
+    @method()
+    def Release(self) -> None:
+        print('Advertisement released by BlueZ')
+
+
+async def register_advertisement(bus: MessageBus, adapter_path: str, service_uuids=None, local_name=None):
+    """Cria e registra um objeto LEAdvertisement1 no bus do sistema.
+
+    Retorna o objeto advertisement e o proxy para o manager usado para registrar.
+    """
+    try:
+        # Cria um caminho único para o advertisement
+        adv_path = f"{adapter_path}/adv{uuid.uuid4().hex[:8]}"
+
+        # Exportar o objeto no bus
+        advertisement = Advertisement(adv_path, adv_type='peripheral', service_uuids=service_uuids, local_name=local_name)
+        bus.export(advertisement.path, advertisement)
+
+        # Obter o manager LEAdvertisingManager1 no adaptador
+        introspect = await bus.introspect('org.bluez', adapter_path)
+        adapter_obj = bus.get_proxy_object('org.bluez', adapter_path, introspect)
+
+        # Verificar se a interface LEAdvertisingManager1 está disponível
+        interfaces = [iface.name for iface in introspect.interfaces]
+        if 'org.bluez.LEAdvertisingManager1' not in interfaces:
+            print('LEAdvertisingManager1 não disponível neste adaptador; não foi possível registrar advertisement')
+            try:
+                bus.unexport(advertisement.path)
+            except Exception:
+                pass
+            return None, None
+
+        adv_manager = adapter_obj.get_interface('org.bluez.LEAdvertisingManager1')
+
+        # Montar options vazias
+        options = {}
+
+        # Registrar
+        await adv_manager.call_register_advertisement(advertisement.path, options)
+        print(f'Registered LE Advertisement at {advertisement.path}')
+        return advertisement, adv_manager
+
+    except Exception as e:
+        print(f'Erro ao registrar advertisement: {e}')
+        return None, None
+
+
+async def unregister_advertisement(bus: MessageBus, advertisement, adv_manager):
+    try:
+        if adv_manager and advertisement:
+            await adv_manager.call_unregister_advertisement(advertisement.path)
+            print('Unregistered LE Advertisement')
+        # remover export do objeto no bus
+        try:
+            bus.unexport(advertisement.path)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f'Erro ao desregistrar advertisement: {e}')

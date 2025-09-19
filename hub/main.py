@@ -5,7 +5,7 @@ from dbus_next.aio import MessageBus
 from dbus_next import Variant, BusType
 from gatt_server import register_gatt_application
 from constants import SHARED_DIR, ADAPTER_PATH, DEVICE_NAME
-from bluetooth import setup_advertising, print_bluetooth_status, print_status_summary, unpair_all_devices, monitor_events
+from bluetooth import setup_advertising, print_bluetooth_status, print_status_summary, unpair_all_devices, monitor_events, register_advertisement, unregister_advertisement, start_event_listeners
 
 
 async def main(poll: int | None = None):
@@ -24,18 +24,30 @@ async def main(poll: int | None = None):
     await unpair_all_devices(bus)
 
     # Registrar aplicação GATT
-    registration_success = await register_gatt_application(bus)
+    registration_result = await register_gatt_application(bus)
+    # registration_result é (True, [uuids]) ou (False, [])
+    if isinstance(registration_result, tuple):
+        registration_success, service_uuids = registration_result
+    else:
+        registration_success = bool(registration_result)
+        service_uuids = []
 
-    # Configurar advertising apenas se o registro GATT foi bem-sucedido
+    # Registrar advertising LE explicitamente, se possível
+    advertisement = None
+    adv_manager = None
     if registration_success:
-        await setup_advertising(bus)
+        # registrar objeto advertisement (usamos o service UUID do FileService se disponível)
+        advertisement, adv_manager = await register_advertisement(bus, ADAPTER_PATH, service_uuids=service_uuids, local_name=DEVICE_NAME)
+        if advertisement is None:
+            # fallback para ajustar propriedades do adaptador
+            await setup_advertising(bus)
     else:
         print("GATT registration failed, continuing without advertising")
 
     print("Servidor GATT BLE pronto! Conecte pelo seu celular ou app BLE.")
 
-    # Iniciar monitor de eventos em segundo plano (detectar pair/connect)
-    monitor_task = asyncio.create_task(monitor_events(bus, interval=1.0))
+    # Iniciar listeners D-Bus para eventos (mais eficiente que polling)
+    listeners_task = asyncio.create_task(start_event_listeners(bus))
 
     # Obter status do adaptador Bluetooth e imprimir resumo consolidado (evita logs duplicados)
     try:
@@ -55,9 +67,16 @@ async def main(poll: int | None = None):
                 print_status_summary(status, DEVICE_NAME, SHARED_DIR)
                 await asyncio.sleep(poll)
     finally:
-        monitor_task.cancel()
+        # desregistrar advertisement se foi registrado
         try:
-            await monitor_task
+            if advertisement is not None and adv_manager is not None:
+                await unregister_advertisement(bus, advertisement, adv_manager)
+        except Exception as e:
+            print(f"Erro ao desregistrar advertisement no final: {e}")
+
+        listeners_task.cancel()
+        try:
+            await listeners_task
         except asyncio.CancelledError:
             pass
 
