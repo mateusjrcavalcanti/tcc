@@ -116,6 +116,34 @@ async def print_bluetooth_status(bus):
         return None
 
 
+async def unpair_all_devices(bus):
+    """Remove todos os dispositivos pareados do adaptador (chama Adapter1.RemoveDevice)."""
+    try:
+        # obter objetos gerenciados e adaptador proxy
+        obj_manager = bus.get_proxy_object('org.bluez', '/', await bus.introspect('org.bluez', '/'))
+        manager_iface = obj_manager.get_interface('org.freedesktop.DBus.ObjectManager')
+        objects = await manager_iface.call_get_managed_objects()
+
+        # adaptador proxy para chamar RemoveDevice
+        introspect = await bus.introspect('org.bluez', ADAPTER_PATH)
+        adapter_obj = bus.get_proxy_object('org.bluez', ADAPTER_PATH, introspect)
+        adapter_iface = adapter_obj.get_interface('org.bluez.Adapter1')
+
+        removed = 0
+        for obj_path, interfaces in objects.items():
+            if 'org.bluez.Device1' in interfaces:
+                try:
+                    # RemoveDevice espera o object path do dispositivo
+                    await adapter_iface.call_remove_device(obj_path)
+                    removed += 1
+                except Exception as e:
+                    print(f"Falha ao remover dispositivo {obj_path}: {e}")
+
+        print(f"Despareados {removed} dispositivos (tentativa de limpeza)")
+    except Exception as e:
+        print(f"Erro ao tentar desparear dispositivos: {e}")
+
+
 def print_status_summary(status, device_name, shared_dir):
     """Imprime um único bloco de logs resumido (evita duplicação)."""
     if status is None:
@@ -162,6 +190,9 @@ async def main(poll: int | None = None):
     # Renomear adaptador e ligar
     await props_iface.call_set('org.bluez.Adapter1', 'Alias', Variant('s', DEVICE_NAME))
     await props_iface.call_set('org.bluez.Adapter1', 'Powered', Variant('b', True))
+
+    # Desparear todos os dispositivos na inicialização (limpeza)
+    await unpair_all_devices(bus)
 
     # Registrar aplicação GATT
     registration_success = await register_gatt_application(bus)
