@@ -3,7 +3,7 @@ import asyncio
 from dbus_next.aio import MessageBus
 from dbus_next import Variant
 from dbus_next import BusType
-from dbus_next.service import (ServiceInterface, method, dbus_property)
+from dbus_next.service import (ServiceInterface, method, dbus_property, PropertyAccess)
 from dbus_next.aio import MessageBus
 import uuid
 from constants import SHARED_DIR, ADAPTER_PATH, DEVICE_NAME
@@ -386,15 +386,15 @@ class Advertisement(ServiceInterface):
         self.service_uuids = service_uuids or []
         self.local_name = local_name
 
-    @dbus_property(access=None)
+    @dbus_property(access=PropertyAccess.READ)
     def Type(self) -> 's':  # type: ignore
         return self._type
 
-    @dbus_property(access=None)
+    @dbus_property(access=PropertyAccess.READ)
     def ServiceUUIDs(self) -> 'as':  # type: ignore
         return self.service_uuids
 
-    @dbus_property(access=None)
+    @dbus_property(access=PropertyAccess.READ)
     def LocalName(self) -> 's':  # type: ignore
         return self.local_name or ''
 
