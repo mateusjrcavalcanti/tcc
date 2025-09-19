@@ -16,7 +16,7 @@ class HelloWorldCharacteristic(ServiceInterface):
         self.path = path
 
     @method()
-    def ReadValue(self) -> list:
+    def ReadValue(self) -> 'ay':
         msg = "Hello World"
         print("HelloWorld lido:", msg)
         return [Variant('y', ord(c)) for c in msg]
@@ -28,7 +28,7 @@ class PingPongCharacteristic(ServiceInterface):
         self.path = path
 
     @method()
-    def ReadValue(self) -> list:
+    def ReadValue(self) -> 'ay':
         msg = "Pong"
         print("PingPong lido:", msg)
         return [Variant('y', ord(c)) for c in msg]
@@ -51,12 +51,11 @@ class MessageCharacteristic(ServiceInterface):
         self.subscribed = False
 
     @method()
-    def ReadValue(self) -> list:
-        print("Mensagem atual lida:", self.message)
+    def ReadValue(self) -> 'ay':
         return [Variant('y', ord(c)) for c in self.message]
 
     @method()
-    def WriteValue(self, value: list):
+    def WriteValue(self, value: 'ay'):
         self.message = "".join([chr(v.value) for v in value])
         print("Mensagem atualizada para:", self.message)
         if self.subscribed:
@@ -73,7 +72,7 @@ class MessageCharacteristic(ServiceInterface):
         print("Notificação parada para a característica Message")
 
     @signal()
-    def PropertiesChanged(self, changed: dict):
+    def PropertiesChanged(self, changed: 'a{sv}'): # type: ignore
         """Sinal enviado quando a mensagem muda"""
         pass
 
