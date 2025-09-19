@@ -60,7 +60,6 @@ export default function EditorPage() {
       <div className="flex flex-1 h-full overflow-hidden">
         <div className="bg-[#282a36] h-full min-h-0 min-w-0 transition-all duration-300 relative flex-1">
           <BlocklyEditor ref={editorRef} className="h-full w-full" />
-          {/* Botão de código agora é gerenciado diretamente pelo Blockly (createCodeButton). */}
         </div>
       </div>
     </div>

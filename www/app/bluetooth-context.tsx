@@ -25,10 +25,7 @@ interface BluetoothContextType {
   storageRead: (path: string) => Promise<Uint8Array | string>;
   storageWrite: (path: string, base64Data: string, overwrite?: boolean) => Promise<any>;
   storageDelete: (path: string) => Promise<any>;
-  storageMkdir: (path: string) => Promise<any>;
-  scriptStart: (filename: string) => Promise<any>;
-  scriptChunk: (base64Chunk: string) => Promise<any>;
-  scriptRun: (path: string) => Promise<any>;
+  storageCreate: (path: string, base64Data?: string) => Promise<any>;
   wifiStatus: () => Promise<any>;
 }
 
@@ -47,25 +44,90 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // cache de characteristics por uuid
   const charCache = React.useRef<Map<string, BluetoothRemoteGATTCharacteristic>>(new Map());
+  // handlers e chars inscritos para notificações
+  const notifHandlersRef = React.useRef<Map<string, EventListener>>(new Map());
+  const notifCharsRef = React.useRef<Map<string, BluetoothRemoteGATTCharacteristic>>(new Map());
 
   const GATT = React.useMemo(() => ({
-    WIFI_SERVICE: "22345678-1234-5678-1234-56789abcde00",
-    WIFI_SSID: "22345678-1234-5678-1234-56789abcde01",
-    WIFI_PASS: "22345678-1234-5678-1234-56789abcde02",
-    WIFI_STATUS: "22345678-1234-5678-1234-56789abcde03",
+    // UUIDs aligned with the Python GATT output
+    WIFI_SERVICE: "87654321-4321-6789-4321-0fedcba98765",
+    WIFI_SCAN: "87654321-4321-6789-4321-0fedcba98766",
+    WIFI_STATUS: "87654321-4321-6789-4321-0fedcba98767",
+    WIFI_SETNETWORK: "87654321-4321-6789-4321-0fedcba98768",
+    WIFI_DISCONNECT: "87654321-4321-6789-4321-0fedcba98769",
 
-    SCRIPT_SERVICE: "32345678-1234-5678-1234-56789abcde00",
-    SCRIPT_WRITE: "32345678-1234-5678-1234-56789abcde01",
-    SCRIPT_STATUS: "32345678-1234-5678-1234-56789abcde02",
-    SCRIPT_RUN: "32345678-1234-5678-1234-56789abcde03",
-
-    FS_SERVICE: "42345678-1234-5678-1234-56789abcde00",
-    FS_LIST: "42345678-1234-5678-1234-56789abcde01",
-    FS_READ: "42345678-1234-5678-1234-56789abcde02",
-    FS_WRITE: "42345678-1234-5678-1234-56789abcde03",
-    FS_DELETE: "42345678-1234-5678-1234-56789abcde04",
-    FS_MKDIR: "42345678-1234-5678-1234-56789abcde05",
+    FS_SERVICE: "12345678-1234-5678-1234-56789abcdef0",
+    FS_LIST: "12345678-1234-5678-1234-56789abcdef1",
+    FS_CREATE: "12345678-1234-5678-1234-56789abcdef2",
+    FS_DELETE: "12345678-1234-5678-1234-56789abcdef3",
+    FS_READ: "12345678-1234-5678-1234-56789abcdef4",
+    FS_WRITE: "12345678-1234-5678-1234-56789abcdef5",
   }), []);
+
+  // --- GATT helpers (moved up so connect/attemptReconnect can use them)
+  const ensureConnectedGatt = useCallback(async () => {
+    if (!device) throw new Error("Nenhum dispositivo selecionado");
+    if (!device.gatt) throw new Error("GATT não disponível neste dispositivo");
+    if (!device.gatt.connected) {
+      await device.gatt.connect();
+    }
+    return device.gatt;
+  }, [device]);
+
+  const getCharacteristic = useCallback(
+    async (serviceUuid: string, charUuid: string) => {
+      const cacheKey = `${serviceUuid}|${charUuid}`;
+      const cached = charCache.current.get(cacheKey);
+      if (cached) return cached;
+      const gatt = await ensureConnectedGatt();
+      const service = await gatt.getPrimaryService(serviceUuid);
+      const characteristic = await service.getCharacteristic(charUuid);
+      charCache.current.set(cacheKey, characteristic);
+      return characteristic;
+    },
+    [ensureConnectedGatt]
+  );
+
+  const readTextFromChar = useCallback(async (serviceUuid: string, charUuid: string) => {
+    const c = await getCharacteristic(serviceUuid, charUuid);
+    const v = await c.readValue();
+    const arr = new Uint8Array(v.buffer);
+    // tentar decodificar como UTF-8; se falhar, retornar base64
+    try {
+      const decoded = new TextDecoder().decode(arr);
+      return decoded;
+    } catch {
+      // fallback para base64
+      const b64 = btoa(String.fromCharCode(...arr));
+      return b64;
+    }
+  }, [getCharacteristic]);
+
+  const writeToChar = useCallback(async (serviceUuid: string, charUuid: string, data: ArrayBuffer | Uint8Array) => {
+    const c = await getCharacteristic(serviceUuid, charUuid);
+    // garantir BufferSource (usamos Uint8Array)
+    let buf: Uint8Array;
+    if (data instanceof Uint8Array) buf = data;
+    else if (data instanceof ArrayBuffer) buf = new Uint8Array(data);
+    else buf = new Uint8Array((data as any).buffer as ArrayBuffer);
+    // writeValue typing in some TS configs expects ArrayBuffer; cast to any to avoid lib mismatch
+    await c.writeValue(buf as any);
+  }, [getCharacteristic]);
+
+  const writeJson = useCallback(async (serviceUuid: string, charUuid: string, obj: any) => {
+    const s = JSON.stringify(obj);
+    const bytes = new TextEncoder().encode(s);
+    await writeToChar(serviceUuid, charUuid, bytes);
+  }, [writeToChar]);
+
+  // small helper to convert base64 -> Uint8Array
+  const base64ToUint8 = useCallback((b64: string) => {
+    const bin = atob(b64);
+    const len = bin.length;
+    const arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }, []);
 
   const connect = useCallback(async () => {
     try {
@@ -86,15 +148,55 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
       const device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: [
-          GATT.WIFI_SERVICE,
-          GATT.SCRIPT_SERVICE,
-          GATT.FS_SERVICE,
+              GATT.WIFI_SERVICE,
+              GATT.FS_SERVICE,
         ], // solicitar serviços usados
       });
 
       setDevice(device);
-      // se conectado imediatamente, marque; caso contrário, ficará idle até conectar via GATT
-      setStatus(device.gatt && device.gatt.connected ? "connected" : "idle");
+      // tentar conectar GATT imediatamente (melhora UX: já temos sessão pronta)
+      try {
+        if (device.gatt && typeof device.gatt.connect === "function" && !device.gatt.connected) {
+          await device.gatt.connect();
+        }
+        if (device.gatt && device.gatt.connected) {
+          setStatus("connected");
+          // iniciar inscrição em notificações importantes
+          void (async () => {
+            try {
+              // tenta subscrever às characteristics de status (silencioso em falha)
+                  const wifiStatusChar = await getCharacteristic(GATT.WIFI_SERVICE, GATT.WIFI_STATUS).catch(() => null);
+              if (wifiStatusChar) {
+                const handler = (ev: Event) => {
+                  try {
+                    const t = (ev.target as unknown) as BluetoothRemoteGATTCharacteristic | null;
+                    if (!t || !t.value) return;
+                    const v = t.value;
+                    const arr = new Uint8Array(v.buffer);
+                    const text = new TextDecoder().decode(arr);
+                    console.debug('WIFI_STATUS notification:', text);
+                  } catch {
+                    // ignore
+                  }
+                };
+                notifHandlersRef.current.set(GATT.WIFI_STATUS, handler as EventListener);
+                notifCharsRef.current.set(GATT.WIFI_STATUS, wifiStatusChar);
+                wifiStatusChar.startNotifications().then(() => wifiStatusChar.addEventListener('characteristicvaluechanged', handler as EventListener)).catch(() => {});
+              }
+
+              // No longer handling script notifications
+            } catch {
+              // silencioso
+            }
+          })();
+        } else {
+          setStatus('idle');
+        }
+      } catch (err) {
+        // se falhar ao conectar GATT, não bloqueia o fluxo de seleção do device
+        console.warn('Falha ao conectar GATT automaticamente:', err);
+        setStatus(device.gatt && device.gatt.connected ? 'connected' : 'idle');
+      }
       toast.success(
         `Dispositivo selecionado: ${device.name ?? device.id ?? "dispositivo"}`
       );
@@ -129,6 +231,52 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [GATT]);
 
+    // Função helper para (re)inscrever em notifications importantes
+    const subscribeStatusChars = useCallback(async () => {
+      // garantir GATT conectado
+      if (!device) throw new Error('Nenhum dispositivo');
+      if (!device.gatt) throw new Error('GATT não disponível');
+      if (!device.gatt.connected) await device.gatt.connect();
+
+      // helper para subscrever uma char (remove listener anterior se existir)
+      const subscribe = async (serviceUuid: string, charUuid: string) => {
+        // remover inscrição anterior, se existir
+        try {
+          const prevHandler = notifHandlersRef.current.get(charUuid);
+          const prevChar = notifCharsRef.current.get(charUuid);
+          if (prevChar && prevHandler) {
+            try { prevChar.removeEventListener('characteristicvaluechanged', prevHandler); } catch {}
+            try { await prevChar.stopNotifications(); } catch {}
+          }
+        } catch {}
+
+        const c = await getCharacteristic(serviceUuid, charUuid).catch(() => null);
+        if (!c) return;
+
+        const handler = (ev: Event) => {
+          try {
+            const t = (ev.target as unknown) as BluetoothRemoteGATTCharacteristic | null;
+            if (!t || !t.value) return;
+            const v = t.value;
+            const arr = new Uint8Array(v.buffer);
+            const text = new TextDecoder().decode(arr);
+            console.debug(`${charUuid} notification:`, text);
+          } catch {
+            // ignore
+          }
+        };
+
+        notifHandlersRef.current.set(charUuid, handler as EventListener);
+        notifCharsRef.current.set(charUuid, c);
+        await c.startNotifications().catch(() => {});
+        try { c.addEventListener('characteristicvaluechanged', handler as EventListener); } catch {}
+      };
+
+      // subscrever wifi/status e script/status (silencioso em falha)
+      await subscribe(GATT.WIFI_SERVICE, GATT.WIFI_STATUS).catch(() => {});
+        // No longer subscribing to script/status
+    }, [device, getCharacteristic, GATT]);
+
   // tenta reconectar com retries exponenciais
   const attemptReconnect = React.useCallback(
     async (maxRetries = 3) => {
@@ -149,6 +297,10 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
           if (device.gatt.connected) {
             setStatus("connected");
             setError(null);
+            // re-subscrever características de status após reconexão
+            try {
+              await subscribeStatusChars();
+            } catch {}
             reconnectingRef.current = false;
             toast.success(
               `Reconectado: ${device?.name ?? device?.id ?? "dispositivo"}`
@@ -177,6 +329,19 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
     // desconexão manual — não tentar reconectar
     manualDisconnectRef.current = true;
     reconnectingRef.current = false;
+    // limpar inscrições de notificações
+    try {
+      for (const [uuid, char] of notifCharsRef.current.entries()) {
+        const handler = notifHandlersRef.current.get(uuid);
+        if (handler) {
+          try { char.removeEventListener('characteristicvaluechanged', handler); } catch {}
+        }
+        try { char.stopNotifications().catch(() => {}); } catch {}
+      }
+    } catch {}
+    notifCharsRef.current.clear();
+    notifHandlersRef.current.clear();
+    charCache.current.clear();
     if (
       device &&
       device.gatt &&
@@ -244,6 +409,19 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
             onDisconnected as EventListener
           );
         }
+        // também limpar inscrições locais quando o device muda
+        try {
+          for (const [uuid, char] of notifCharsRef.current.entries()) {
+            const handler = notifHandlersRef.current.get(uuid);
+            if (handler) {
+              try { char.removeEventListener('characteristicvaluechanged', handler); } catch {}
+            }
+            try { char.stopNotifications().catch(() => {}); } catch {}
+          }
+        } catch {}
+        notifCharsRef.current.clear();
+        notifHandlersRef.current.clear();
+        charCache.current.clear();
       } catch {
         // ignore
       }
@@ -252,86 +430,19 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const clearError = useCallback(() => setError(null), []);
 
-  // --- GATT helpers ---
-  const ensureConnectedGatt = useCallback(async () => {
-    if (!device) throw new Error("Nenhum dispositivo selecionado");
-    if (!device.gatt) throw new Error("GATT não disponível neste dispositivo");
-    if (!device.gatt.connected) {
-      await device.gatt.connect();
-    }
-    return device.gatt;
-  }, [device]);
-
-  const getCharacteristic = useCallback(
-    async (serviceUuid: string, charUuid: string) => {
-      const cacheKey = `${serviceUuid}|${charUuid}`;
-      const cached = charCache.current.get(cacheKey);
-      if (cached) return cached;
-      const gatt = await ensureConnectedGatt();
-      const service = await gatt.getPrimaryService(serviceUuid);
-      const characteristic = await service.getCharacteristic(charUuid);
-      charCache.current.set(cacheKey, characteristic);
-      return characteristic;
-    },
-    [ensureConnectedGatt]
-  );
-
-  const readTextFromChar = useCallback(async (serviceUuid: string, charUuid: string) => {
-    const c = await getCharacteristic(serviceUuid, charUuid);
-    const v = await c.readValue();
-    const arr = new Uint8Array(v.buffer);
-    // tentar decodificar como UTF-8; se falhar, retornar base64
-    try {
-      const decoded = new TextDecoder().decode(arr);
-      return decoded;
-    } catch {
-      // fallback para base64
-      const b64 = btoa(String.fromCharCode(...arr));
-      return b64;
-    }
-  }, [getCharacteristic]);
-
-  const writeToChar = useCallback(async (serviceUuid: string, charUuid: string, data: ArrayBuffer | Uint8Array) => {
-    const c = await getCharacteristic(serviceUuid, charUuid);
-    // garantir BufferSource (usamos Uint8Array)
-    let buf: Uint8Array;
-    if (data instanceof Uint8Array) buf = data;
-    else if (data instanceof ArrayBuffer) buf = new Uint8Array(data);
-    else buf = new Uint8Array((data as any).buffer as ArrayBuffer);
-    // writeValue typing in some TS configs expects ArrayBuffer; cast to any to avoid lib mismatch
-    await c.writeValue(buf as any);
-  }, [getCharacteristic]);
-
-  const writeJson = useCallback(async (serviceUuid: string, charUuid: string, obj: any) => {
-    const s = JSON.stringify(obj);
-    const bytes = new TextEncoder().encode(s);
-    await writeToChar(serviceUuid, charUuid, bytes);
-  }, [writeToChar]);
-
-  // small helper to convert base64 -> Uint8Array
-  const base64ToUint8 = useCallback((b64: string) => {
-    const bin = atob(b64);
-    const len = bin.length;
-    const arr = new Uint8Array(len);
-    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
-    return arr;
-  }, []);
-
   // --- exposed APIs (WiFi / Storage / Script) ---
   const wifiSet = useCallback(async (ssid: string, psk?: string | null) => {
-    // write SSID then passphrase (if provided)
-    await writeToChar(GATT.WIFI_SERVICE, GATT.WIFI_SSID, new TextEncoder().encode(ssid));
-    if (psk !== undefined && psk !== null) {
-      await writeToChar(GATT.WIFI_SERVICE, GATT.WIFI_PASS, new TextEncoder().encode(psk));
-    }
-    // optional: read status
+    // use SetNetwork characteristic: send JSON { ssid, psk }
+    const payload: any = { ssid };
+    if (psk !== undefined && psk !== null) payload.psk = psk;
+    await writeJson(GATT.WIFI_SERVICE, GATT.WIFI_SETNETWORK, payload);
     try {
       const status = await readTextFromChar(GATT.WIFI_SERVICE, GATT.WIFI_STATUS);
       return status;
     } catch {
       return null;
     }
-  }, [GATT, writeToChar, readTextFromChar]);
+  }, [GATT, writeJson, readTextFromChar]);
 
   const storageList = useCallback(async (path = "") => {
     // FS_LIST is a read characteristic; some implementations ignore path and always list root
@@ -379,37 +490,12 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
     await writeJson(GATT.FS_SERVICE, GATT.FS_DELETE, { path });
     return { ok: true };
   }, [GATT, writeJson]);
-
-  const storageMkdir = useCallback(async (path: string) => {
-    await writeJson(GATT.FS_SERVICE, GATT.FS_MKDIR, { path });
+  const storageCreate = useCallback(async (path: string, base64Data?: string) => {
+    const payload: any = { path };
+    if (base64Data !== undefined) payload.data = base64Data;
+    await writeJson(GATT.FS_SERVICE, GATT.FS_CREATE, payload);
     return { ok: true };
   }, [GATT, writeJson]);
-
-  const scriptStart = useCallback(async (filename: string) => {
-    // send JSON start header
-    await writeJson(GATT.SCRIPT_SERVICE, GATT.SCRIPT_WRITE, { type: "start", filename });
-    // read status char for session id
-    const status = await readTextFromChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_STATUS);
-    try {
-      return JSON.parse(String(status));
-    } catch {
-      return status;
-    }
-  }, [GATT, writeJson, readTextFromChar]);
-
-  const scriptChunk = useCallback(async (base64Chunk: string) => {
-    const bytes = base64ToUint8(base64Chunk);
-    await writeToChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_WRITE, bytes);
-    // read status
-    const status = await readTextFromChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_STATUS);
-    try { return JSON.parse(String(status)); } catch { return status; }
-  }, [GATT, base64ToUint8, writeToChar, readTextFromChar]);
-
-  const scriptRun = useCallback(async (path: string) => {
-    await writeToChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_RUN, new TextEncoder().encode(path));
-    const status = await readTextFromChar(GATT.SCRIPT_SERVICE, GATT.SCRIPT_STATUS);
-    try { return JSON.parse(String(status)); } catch { return status; }
-  }, [GATT, writeToChar, readTextFromChar]);
 
   const wifiStatus = useCallback(async () => {
     const txt = await readTextFromChar(GATT.WIFI_SERVICE, GATT.WIFI_STATUS);
@@ -429,17 +515,14 @@ export const BluetoothProvider: React.FC<{ children: React.ReactNode }> = ({
         connect,
         disconnect,
         clearError,
-        // exposed helpers
-        wifiSet,
-        storageList,
-        storageRead,
-        storageWrite,
-        storageDelete,
-        storageMkdir,
-        scriptStart,
-        scriptChunk,
-        scriptRun,
-        wifiStatus,
+  // exposed helpers
+  wifiSet,
+  storageList,
+  storageRead,
+  storageWrite,
+  storageDelete,
+  storageCreate,
+  wifiStatus,
       }}
     >
       {children}
