@@ -436,12 +436,30 @@ async def register_advertisement(bus: MessageBus, adapter_path: str, service_uui
         options = {}
 
         # Registrar
-        await adv_manager.call_register_advertisement(advertisement.path, options)
-        print(f'Registered LE Advertisement at {advertisement.path}')
+        try:
+            await adv_manager.call_register_advertisement(advertisement.path, options)
+            print(f'Registered LE Advertisement at {advertisement.path}')
+            return advertisement, adv_manager
+        except Exception as e:
+            # imprimir introspeção curta e traceback para entender o motivo
+            try:
+                print('Adapter interfaces:', [iface.name for iface in introspect.interfaces])
+            except Exception:
+                pass
+            import traceback
+            print('Failed to register advertisement, exception:')
+            traceback.print_exc()
+            try:
+                bus.unexport(advertisement.path)
+            except Exception:
+                pass
+            return None, None
         return advertisement, adv_manager
 
-    except Exception as e:
-        print(f'Erro ao registrar advertisement: {e}')
+    except Exception:
+        import traceback
+        print('Erro inesperado ao tentar registrar advertisement:')
+        traceback.print_exc()
         return None, None
 
 
