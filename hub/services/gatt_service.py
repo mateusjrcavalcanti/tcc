@@ -44,16 +44,32 @@ class GattCharacteristic(ServiceInterface):
 
     @method()
     async def ReadValue(self, options: 'a{sv}') -> 'ay':  # type: ignore
+        print(f"GattCharacteristic.ReadValue called: {self.name} (UUID={self.uuid})")
         if self.read_func:
-            value = self.read_func()
-            return [ord(c) for c in value]
+            try:
+                value = self.read_func()
+                # value may be str or bytes; normalize to bytes
+                if isinstance(value, bytes):
+                    b = value
+                else:
+                    b = str(value).encode("utf-8")
+                print(f"  -> ReadValue returning {len(b)} bytes")
+                return [int(x) for x in b]
+            except Exception as e:
+                print(f"  -> ReadValue handler error for {self.name}: {e}")
+                return []
         return []
 
     @method()
     async def WriteValue(self, value: 'ay', options: 'a{sv}'):  # type: ignore
+        print(f"GattCharacteristic.WriteValue called: {self.name} (UUID={self.uuid}) len={len(value)}")
         if self.write_func:
-            text = ''.join([chr(b) for b in value])
-            self.write_func(text)
+            try:
+                text = ''.join([chr(b) for b in value])
+                print(f"  -> WriteValue payload: {text[:200]}")
+                self.write_func(text)
+            except Exception as e:
+                print(f"  -> WriteValue handler error for {self.name}: {e}")
 
 
 def setup_gatt_service(bus, service_uuid, service_path, characteristics_data):

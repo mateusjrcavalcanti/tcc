@@ -7,7 +7,10 @@ class FileManager:
 
     def list_files(self):
         try:
-            return '\n'.join(f.name for f in self.base_dir.iterdir() if f.is_file())
+            files = [f.name for f in self.base_dir.iterdir() if f.is_file()]
+            # return JSON array string for easier parsing on the client
+            import json
+            return json.dumps(files)
         except Exception as e:
             return f"Error: {str(e)}"
 
