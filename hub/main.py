@@ -1,4 +1,6 @@
 import os
+import sys
+import argparse
 import asyncio
 from pathlib import Path
 from dbus_next.aio import MessageBus
@@ -41,6 +43,9 @@ async def print_bluetooth_status(bus):
         objects = await manager_iface.call_get_managed_objects()
 
         connected_count = 0
+        paired_count = 0
+        connected_names = []
+        paired_names = []
         for obj_path, interfaces in objects.items():
             # interfaces é um dict-like: {interface_name: {prop: Variant(...)}}
             if 'org.bluez.Device1' in interfaces:
@@ -56,6 +61,42 @@ async def print_bluetooth_status(bus):
                         connected = bool(val)
                 if connected:
                     connected_count += 1
+                    # tentar obter nome FriendlyName ou Name
+                    name = None
+                    if 'Name' in dev_props:
+                        try:
+                            name = dev_props['Name'].value
+                        except Exception:
+                            name = dev_props['Name']
+                    elif 'Alias' in dev_props:
+                        try:
+                            name = dev_props['Alias'].value
+                        except Exception:
+                            name = dev_props['Alias']
+                    if name:
+                        connected_names.append(str(name))
+                # contar se emparelhado
+                if 'Paired' in dev_props:
+                    try:
+                        paired = bool(dev_props['Paired'].value)
+                    except Exception:
+                        paired = bool(dev_props['Paired'])
+                    if paired:
+                        paired_count += 1
+                        # obter nome para a lista de pareados
+                        pname = None
+                        if 'Name' in dev_props:
+                            try:
+                                pname = dev_props['Name'].value
+                            except Exception:
+                                pname = dev_props['Name']
+                        elif 'Alias' in dev_props:
+                            try:
+                                pname = dev_props['Alias'].value
+                            except Exception:
+                                pname = dev_props['Alias']
+                        if pname:
+                            paired_names.append(str(pname))
 
         # Retornar os valores para que a formatação/impressão seja feita por um único lugar
         return {
@@ -65,6 +106,9 @@ async def print_bluetooth_status(bus):
             'discoverable': discoverable.value if hasattr(discoverable, 'value') else discoverable,
             'pairable': pairable.value if hasattr(pairable, 'value') else pairable,
             'connected_count': connected_count,
+            'paired_count': paired_count,
+            'connected_names': connected_names,
+            'paired_names': paired_names,
         }
 
     except Exception as e:
@@ -87,10 +131,27 @@ def print_status_summary(status, device_name, shared_dir):
     print(f"Discoverable: {status.get('discoverable')}")
     print(f"Pairable: {status.get('pairable')}")
     print(f"Dispositivos conectados atualmente: {status.get('connected_count')}")
+    print(f"Dispositivos pareados: {status.get('paired_count')}")
+    # Listar nomes (se houver)
+    cnames = status.get('connected_names') or []
+    pnames = status.get('paired_names') or []
+    if cnames:
+        print("Nomes dos dispositivos conectados:")
+        for n in cnames:
+            print(f"  - {n}")
+    else:
+        print("Nomes dos dispositivos conectados: nenhum")
+
+    if pnames:
+        print("Nomes dos dispositivos pareados:")
+        for n in pnames:
+            print(f"  - {n}")
+    else:
+        print("Nomes dos dispositivos pareados: nenhum")
     print(f"Arquivos compartilhados em: {shared_dir}")
     print("---------------------------\n")
 
-async def main():
+async def main(poll: int | None = None):
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
     # Configurar adaptador Bluetooth
@@ -114,15 +175,32 @@ async def main():
     print("Servidor GATT BLE pronto! Conecte pelo seu celular ou app BLE.")
 
     # Obter status do adaptador Bluetooth e imprimir resumo consolidado (evita logs duplicados)
-    status = await print_bluetooth_status(bus)
-    print_status_summary(status, DEVICE_NAME, SHARED_DIR)
+    if poll is None:
+        status = await print_bluetooth_status(bus)
+        print_status_summary(status, DEVICE_NAME, SHARED_DIR)
 
-    # Manter o programa rodando
-    await asyncio.Future()
+        # Manter o programa rodando
+        await asyncio.Future()
+    else:
+        # Atualização periódica: limpar terminal e reimprimir o resumo a cada <poll> segundos
+        try:
+            while True:
+                status = await print_bluetooth_status(bus)
+                # limpar tela
+                os.system('clear')
+                print("Servidor GATT BLE pronto! Conecte pelo seu celular ou app BLE.")
+                print_status_summary(status, DEVICE_NAME, SHARED_DIR)
+                await asyncio.sleep(poll)
+        except asyncio.CancelledError:
+            pass
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='GATT BLE server status')
+    parser.add_argument('--poll', type=int, default=None, help='Atualiza o status a cada N segundos (se omitido, mostra apenas uma vez)')
+    args = parser.parse_args()
+
     try:
-        asyncio.run(main())
+        asyncio.run(main(poll=args.poll))
     except KeyboardInterrupt:
         print("Servidor encerrado pelo usuário")
     except Exception as e:
