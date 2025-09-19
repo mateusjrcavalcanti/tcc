@@ -375,15 +375,15 @@ class Advertisement(ServiceInterface):
         self.service_uuids = service_uuids or []
         self.local_name = local_name
 
-    @dbus_property(signature='s')
+    @dbus_property()
     def Type(self):
         return self._type
 
-    @dbus_property(signature='as')
+    @dbus_property()
     def ServiceUUIDs(self):
         return self.service_uuids
 
-    @dbus_property(signature='s')
+    @dbus_property()
     def LocalName(self):
         return self.local_name or ''
 
