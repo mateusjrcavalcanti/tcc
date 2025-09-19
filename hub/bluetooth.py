@@ -71,8 +71,8 @@ async def print_bluetooth_status(bus):
                             name = dev_props['Alias'].value
                         except Exception:
                             name = dev_props['Alias']
-                    if name:
-                        connected_names.append(str(name))
+            if name:
+                connected_names.append(str(name))
                 # contar se emparelhado
                 if 'Paired' in dev_props:
                     try:
@@ -268,11 +268,11 @@ async def start_event_listeners(bus):
                 paired = bool(props['Paired'])
 
         display_name = name or address or path
-        # imprimir eventos iniciais se necessário
+        # imprimir eventos iniciais se necessário, incluindo MAC quando disponível
         if connected:
-            print(f"[evento] Dispositivo conectado: {display_name}")
+            print(f"[evento] Dispositivo conectado: {display_name} ({address})")
         if paired:
-            print(f"[evento] Dispositivo pareado: {display_name}")
+            print(f"[evento] Dispositivo pareado: {display_name} ({address})")
 
         # Exportar proxy do dispositivo e ligar PropertiesChanged
         try:
@@ -304,9 +304,9 @@ async def start_event_listeners(bus):
                         # primeiro estado observado
                         pass
                     elif new_connected and not prev:
-                        print(f"[evento] Dispositivo conectado: {n or display_name}")
+                        print(f"[evento] Dispositivo conectado: {n or display_name} ({address})")
                     elif not new_connected and prev:
-                        print(f"[evento] Dispositivo desconectado: {n or display_name}")
+                        print(f"[evento] Dispositivo desconectado: {n or display_name} ({address})")
                     device_state.setdefault(path, {})['connected'] = new_connected
 
                 # Pareado
@@ -319,9 +319,9 @@ async def start_event_listeners(bus):
                     if prevp is None:
                         pass
                     elif new_paired and not prevp:
-                        print(f"[evento] Dispositivo pareado: {n or display_name}")
+                        print(f"[evento] Dispositivo pareado: {n or display_name} ({address})")
                     elif not new_paired and prevp:
-                        print(f"[evento] Dispositivo despareado: {n or display_name}")
+                        print(f"[evento] Dispositivo despareado: {n or display_name} ({address})")
                     device_state.setdefault(path, {})['paired'] = new_paired
 
             props_iface.on_properties_changed(on_properties_changed)

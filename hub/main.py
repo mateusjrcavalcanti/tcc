@@ -6,6 +6,7 @@ from dbus_next import Variant, BusType
 from gatt_server import register_gatt_application
 from constants import SHARED_DIR, ADAPTER_PATH, DEVICE_NAME
 from bluetooth import setup_advertising, print_bluetooth_status, print_status_summary, unpair_all_devices, monitor_events, register_advertisement, unregister_advertisement, start_event_listeners
+from agent import register_agent, unregister_agent
 
 
 async def main(poll: int | None = None):
@@ -31,6 +32,9 @@ async def main(poll: int | None = None):
     else:
         registration_success = bool(registration_result)
         service_uuids = []
+
+    # Registrar agent do BlueZ (auto-confirm)
+    agent = await register_agent(bus, capability='KeyboardDisplay')
 
     # Registrar advertising LE explicitamente, se possível
     advertisement = None
@@ -73,6 +77,12 @@ async def main(poll: int | None = None):
                 await unregister_advertisement(bus, advertisement, adv_manager)
         except Exception as e:
             print(f"Erro ao desregistrar advertisement no final: {e}")
+
+        # desregistrar agent
+        try:
+            await unregister_agent(bus, agent)
+        except Exception as e:
+            print(f"Erro ao desregistrar agent no final: {e}")
 
         listeners_task.cancel()
         try:
